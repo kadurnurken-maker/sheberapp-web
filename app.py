@@ -216,6 +216,8 @@ class WrestlingCoach(VideoProcessorBase):
 
     def __init__(self):
         # MediaPipe Pose — runs inside the WebRTC worker thread
+        import mediapipe as mp                 # 🔥 ДОБАВЬ ЭТУ СТРОЧКУ СЮДА
+        
         self.mp_pose = mp.solutions.pose
         self.pose = self.mp_pose.Pose(
             static_image_mode=False,
@@ -225,10 +227,6 @@ class WrestlingCoach(VideoProcessorBase):
         )
         self.mp_draw = mp.solutions.drawing_utils
         self.mp_style = mp.solutions.drawing_styles
-
-        # Cooldown counter so we don't spam XP every frame
-        self._correct_frames = 0
-        self._cooldown = 0
 
     # ── landmark helper ──────────────────────────
     def _lm(self, landmarks, idx: int) -> tuple:
