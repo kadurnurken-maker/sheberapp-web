@@ -1,0 +1,12 @@
+# SheberApp — Qazaq Kuresi AI Coach
+# requirements.txt for Streamlit Community Cloud
+# ──────────────────────────────────────────────
+# CRITICAL: Use opencv-python-headless on cloud
+# (opencv-python requires a display/GUI server which cloud VMs lack)
+
+streamlit>=1.32.0
+streamlit-webrtc>=0.47.1
+opencv-python-headless>=4.9.0.80
+mediapipe>=0.10.9
+numpy>=1.26.0
+av>=12.0.0
