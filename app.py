@@ -4,88 +4,95 @@ import numpy as np
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 
-# ── CONFIG ──
+# 1. СТРОГАЯ КОНФИГУРАЦИЯ
 st.set_page_config(page_title="SheberApp Pro", page_icon="🦅", layout="wide")
 
-# ── ULTRA DESIGN CSS ──
+# 2. УЛУЧШЕННЫЙ ULTRA DESIGN (CSS)
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Montserrat:wght@300;700&display=swap');
 
-html, body, [data-testid="stApp"] {
-    background: #020408;
-    color: #ffffff;
-    font-family: 'Montserrat', sans-serif;
-}
+    /* Основной фон */
+    .stApp {
+        background: radial-gradient(circle at top right, #0a0f1a, #020408);
+        color: #e0e0e0;
+        font-family: 'Montserrat', sans-serif;
+    }
 
-.stApp {
-    animation: fadeIn 1.2s cubic-bezier(0.22, 1, 0.36, 1);
-}
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
+    /* Заголовки в стиле Киберпанк */
+    h1, h2, h3 {
+        font-family: 'Orbitron', sans-serif;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        color: #f5c842 !important;
+        text-shadow: 0 0 15px rgba(245, 200, 66, 0.3);
+    }
 
-.rank-card {
-    background: rgba(255, 255, 255, 0.02);
-    backdrop-filter: blur(15px);
-    border-radius: 24px;
-    padding: 25px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-    text-align: center;
-    transition: 0.4s ease;
-}
-.rank-card:hover {
-    border-color: #f5c842;
-    background: rgba(245, 200, 66, 0.05);
-    transform: translateY(-5px);
-}
+    /* Контейнеры статистики */
+    .metric-container {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(245, 200, 66, 0.2);
+        border-radius: 20px;
+        padding: 20px;
+        text-align: center;
+        backdrop-filter: blur(10px);
+        transition: 0.3s;
+    }
+    .metric-container:hover {
+        border-color: #f5c842;
+        box-shadow: 0 0 20px rgba(245, 200, 66, 0.1);
+    }
 
-.rank-name { font-size: 2.2rem; font-weight: 900; color: #f5c842; text-transform: uppercase; }
-.xp-value { font-size: 1.8rem; font-weight: 700; color: #4db8ff; }
+    .metric-label { font-size: 0.8rem; color: #888; text-transform: uppercase; }
+    .metric-value { font-size: 2rem; font-weight: 700; color: #ffffff; }
 
-.xp-bar-bg { background: rgba(255,255,255,0.05); border-radius: 50px; height: 12px; margin: 15px 0; overflow: hidden; }
-.xp-bar-fg { 
-    background: linear-gradient(90deg, #f5c842, #ffae00); 
-    height: 100%; 
-    border-radius: 50px;
-    transition: width 1.5s cubic-bezier(0.65, 0, 0.35, 1);
-}
+    /* Видео и Картинки */
+    .stImage, .element-container iframe {
+        border-radius: 15px;
+        border: 2px solid rgba(255,255,255,0.1);
+    }
+
+    /* Кнопки */
+    .stButton>button {
+        width: 100%;
+        background: linear-gradient(90deg, #f5c842, #ffae00);
+        color: black !important;
+        font-weight: 700;
+        border: none;
+        border-radius: 10px;
+        padding: 10px;
+        transition: 0.3s;
+    }
+    .stButton>button:hover {
+        transform: scale(1.02);
+        box-shadow: 0 0 15px #f5c842;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# ── DATA & CONSTANTS ──
+# ── DATA ──
 RANKS = [(0, 100, "Bala", "🥋"), (101, 400, "Zhasospirim", "⚔️"), (401, 1000, "Batyr", "🦅"), (1001, 9999, "Sheber", "👑")]
 RTC_CONFIG = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
 
-# ── SESSION STATE ──
-if "xp" not in st.session_state: 
-    st.session_state.update({"xp": 0, "user_name": "Batyr", "throw": "Zhambas", "reps": 0})
+# ── STATE ──
+if "xp" not in st.session_state:
+    st.session_state.update({"xp": 0, "reps": 0, "throw": "Zhambas"})
 
-# ── HELPER FUNCTION (MATH) ──
+# ── MATH ──
 def calculate_angle(a, b, c):
-    a = np.array(a)
-    b = np.array(b)
-    c = np.array(c)
-    ba = a - b
-    bc = c - b
+    a, b, c = np.array(a), np.array(b), np.array(c)
+    ba, bc = a - b, c - b
     cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
-    angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
-    return np.degrees(angle)
+    return np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
 
-# ── AI LOGIC ──
+# ── AI ENGINE ──
 class WrestlingCoach(VideoProcessorBase):
     def __init__(self):
-        # FIX: Local import to prevent AttributeError in Streamlit Cloud
+        # Импорт ВНУТРИ класса решает проблему AttributeError на сервере
         import mediapipe as mp
         self.mp_pose = mp.solutions.pose
         self.mp_drawing = mp.solutions.drawing_utils
-        self.pose = self.mp_pose.Pose(
-            min_detection_confidence=0.5, 
-            min_tracking_confidence=0.5,
-            model_complexity=1
-        )
+        self.pose = self.mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
         self._correct_frames = 0
         self._cooldown = 0
 
@@ -97,106 +104,91 @@ class WrestlingCoach(VideoProcessorBase):
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         res = self.pose.process(rgb)
 
-        status = "POSITIONING..."
-        color = (150, 150, 150) 
+        status = "WAINTING FOR SKELETON..."
+        color = (100, 100, 100)
 
         if res.pose_landmarks:
-            # Draw Skeleton
             self.mp_drawing.draw_landmarks(
                 img, res.pose_landmarks, self.mp_pose.POSE_CONNECTIONS,
-                landmark_drawing_spec=self.mp_drawing.DrawingSpec(color=(245, 200, 66), thickness=2, circle_radius=3),
-                connection_drawing_spec=self.mp_drawing.DrawingSpec(color=(255, 255, 255), thickness=2)
+                landmark_drawing_spec=self.mp_drawing.DrawingSpec(color=(245, 200, 66), thickness=2, circle_radius=2)
             )
             
-            lms = res.pose_landmarks.landmark
-            # Get key points
             try:
+                lms = res.pose_landmarks.landmark
+                # Точки для анализа (Биомеханика)
                 shoulder = [lms[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].x, lms[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
                 hip = [lms[self.mp_pose.PoseLandmark.LEFT_HIP.value].x, lms[self.mp_pose.PoseLandmark.LEFT_HIP.value].y]
                 knee = [lms[self.mp_pose.PoseLandmark.LEFT_KNEE.value].x, lms[self.mp_pose.PoseLandmark.LEFT_KNEE.value].y]
-                ankle = [lms[self.mp_pose.PoseLandmark.LEFT_ANKLE.value].x, lms[self.mp_pose.PoseLandmark.LEFT_ANKLE.value].y]
-
-                back_angle = calculate_angle(shoulder, hip, knee)
-                knee_angle = calculate_angle(hip, knee, ankle)
                 
-                # Check posture
-                if back_angle > 150 and knee_angle < 145:
+                angle = calculate_angle(shoulder, hip, knee)
+
+                if angle > 150: # Пример логики для броска
                     self._correct_frames += 1
-                    status = "GOOD! HOLD..."
-                    color = (0, 200, 255)
-                    
-                    if self._correct_frames > 25 and self._cooldown == 0:
-                        st.session_state["xp"] += 15
+                    status = "READY TO THROW!"
+                    color = (0, 255, 255)
+                    if self._correct_frames > 20 and self._cooldown == 0:
+                        st.session_state["xp"] += 10
                         st.session_state["reps"] += 1
                         self._cooldown = 30
-                        self._correct_frames = 0
                 else:
-                    self._correct_frames = 0
-                    status = "FIX FORM"
-                    color = (0, 100, 255)
-            except:
-                pass
-                
-            if self._cooldown > 0:
-                self._cooldown -= 1
-                status = "POINT EARNED!"
-                color = (0, 255, 100)
+                    status = "FIX YOUR BACK"
+                    color = (0, 0, 255)
+            except: pass
 
-        cv2.rectangle(img, (0, h - 80), (450, h), (0,0,0), -1)
-        cv2.putText(img, status, (20, h-30), cv2.FONT_HERSHEY_DUPLEX, 1.2, color, 2)
-        
+        if self._cooldown > 0:
+            self._cooldown -= 1
+            status = "NICE! +10 XP"
+            color = (0, 255, 0)
+
+        cv2.putText(img, status, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-# ── UI LAYOUT ──
+# ── ВЕРСТКА ИНТЕРФЕЙСА ──
 st.title("🦅 SHEBER APP PRO")
-st.markdown("### National Wrestling AI Analyst")
+st.write("---")
 
+# Секция статистики
 xp = st.session_state["xp"]
-rank_name, emoji = "Bala", "🥋"
+rank_name = "Bala"
 for lo, hi, n, e in RANKS:
-    if lo <= xp <= hi: rank_name, emoji = n, e
+    if lo <= xp <= hi: rank_name = f"{e} {n}"
 
-c1, c2, c3 = st.columns(3)
-with c1:
-    st.markdown(f"<div class='rank-card'><small>RANK</small><div class='rank-name'>{emoji} {rank_name}</div></div>", unsafe_allow_html=True)
-with c2:
-    prog = min((xp % 400) / 400, 1.0)
-    st.markdown(f"<div class='rank-card'><small>TOTAL XP</small><div class='xp-value'>{xp}</div><div class='xp-bar-bg'><div class='xp-bar-fg' style='width:{int(prog*100)}%'></div></div></div>", unsafe_allow_html=True)
-with c3:
-    st.markdown(f"<div class='rank-card'><small>REPS</small><div class='xp-value'>{st.session_state['reps']}</div></div>", unsafe_allow_html=True)
+col_rank, col_xp, col_reps = st.columns(3)
+with col_rank:
+    st.markdown(f"<div class='metric-container'><div class='metric-label'>Rank</div><div class='metric-value'>{rank_name}</div></div>", unsafe_allow_html=True)
+with col_xp:
+    st.markdown(f"<div class='metric-container'><div class='metric-label'>Total XP</div><div class='metric-value'>{xp}</div></div>", unsafe_allow_html=True)
+with col_reps:
+    st.markdown(f"<div class='metric-container'><div class='metric-label'>Reps</div><div class='metric-value'>{st.session_state['reps']}</div></div>", unsafe_allow_html=True)
 
-st.divider()
+st.write("")
 
-col_left, col_right = st.columns([1.5, 1])
+# Основной блок (Камера + Инструкция)
+main_left, main_right = st.columns([1.5, 1])
 
-with col_left:
-    st.markdown("#### 📸 LIVE AI SCANNER")
+with main_left:
+    st.subheader("📸 AI Scanner")
     webrtc_streamer(
-        key="wrestling-scanner", 
-        video_processor_factory=WrestlingCoach, 
+        key="wrestling-coach",
+        video_processor_factory=WrestlingCoach,
         rtc_configuration=RTC_CONFIG,
-        media_stream_constraints={"video": True, "audio": False},
-        async_processing=True
+        media_stream_constraints={"video": True, "audio": False}
     )
 
-with col_right:
-    st.markdown("#### 📖 Technique Guide")
-    tech = st.selectbox("Choose Technique", ["Zhambas", "Shalu", "Koterme"])
-    st.session_state["throw"] = tech
+with main_right:
+    st.subheader("📖 Technique")
+    tech = st.selectbox("Select Drill", ["Zhambas", "Shalu", "Koterme"])
     
-    if tech == "Zhambas":
-        st.image("jambass.jpg", caption="Zhambas Guide", use_container_width=True)
-        st.warning("Keep hips low and back straight.")
-    elif tech == "Shalu":
-        st.image("shalu.jpg", caption="Shalu Guide", use_container_width=True)
-        st.warning("Focus on the ankle sweep timing.")
-    else:
-        st.image("koterme.webp", caption="Koterme Guide", use_container_width=True)
-        st.warning("Use explosive leg power to lift.")
-
+    # Имена файлов должны совпадать с GitHub
+    images = {"Zhambas": "jambass.jpg", "Shalu": "shalu.jpg", "Koterme": "koterme.webp"}
+    st.image(images[tech], use_container_width=True)
+    
+    st.info(f"Focus on your center of gravity while performing {tech}.")
+    
     if st.button("RESET SESSION"):
-        st.session_state.update({"xp": 0, "reps": 0})
+        st.session_state.xp = 0
+        st.session_state.reps = 0
         st.rerun()
 
-st.divider()
+st.write("---")
 st.image("hero.jpg", use_container_width=True)
