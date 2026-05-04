@@ -1,7 +1,6 @@
 import av
 import cv2
 import numpy as np
-import mediapipe as mp
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 
@@ -19,7 +18,6 @@ html, body, [data-testid="stApp"] {
     font-family: 'Montserrat', sans-serif;
 }
 
-/* Плавное появление всех элементов */
 .stApp {
     animation: fadeIn 1.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -28,7 +26,6 @@ html, body, [data-testid="stApp"] {
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* Стеклянные карточки */
 .rank-card {
     background: rgba(255, 255, 255, 0.02);
     backdrop-filter: blur(15px);
@@ -48,7 +45,6 @@ html, body, [data-testid="stApp"] {
 .rank-name { font-size: 2.2rem; font-weight: 900; color: #f5c842; text-transform: uppercase; }
 .xp-value { font-size: 1.8rem; font-weight: 700; color: #4db8ff; }
 
-/* Кастомный прогресс-бар */
 .xp-bar-bg { background: rgba(255,255,255,0.05); border-radius: 50px; height: 12px; margin: 15px 0; overflow: hidden; }
 .xp-bar-fg { 
     background: linear-gradient(90deg, #f5c842, #ffae00); 
@@ -69,7 +65,6 @@ if "xp" not in st.session_state:
 
 # ── HELPER FUNCTION (MATH) ──
 def calculate_angle(a, b, c):
-    """Calculates the angle between three points (for IB IA complexity points)"""
     a = np.array(a)
     b = np.array(b)
     c = np.array(c)
@@ -82,7 +77,15 @@ def calculate_angle(a, b, c):
 # ── AI LOGIC ──
 class WrestlingCoach(VideoProcessorBase):
     def __init__(self):
-        self.pose = mp.solutions.pose.Pose(min_detection_confidence=0.6, min_tracking_confidence=0.6)
+        # FIX: Local import to prevent AttributeError in Streamlit Cloud
+        import mediapipe as mp
+        self.mp_pose = mp.solutions.pose
+        self.mp_drawing = mp.solutions.drawing_utils
+        self.pose = self.mp_pose.Pose(
+            min_detection_confidence=0.5, 
+            min_tracking_confidence=0.5,
+            model_complexity=1
+        )
         self._correct_frames = 0
         self._cooldown = 0
 
@@ -94,54 +97,53 @@ class WrestlingCoach(VideoProcessorBase):
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         res = self.pose.process(rgb)
 
-        status = "STAND BACK (NO POSE DETECTED)"
-        color = (0, 0, 255) # Red
+        status = "POSITIONING..."
+        color = (150, 150, 150) 
 
         if res.pose_landmarks:
             # Draw Skeleton
-            mp.solutions.drawing_utils.draw_landmarks(
-                img, res.pose_landmarks, mp.solutions.pose.POSE_CONNECTIONS,
-                landmark_drawing_spec=mp.solutions.drawing_utils.DrawingSpec(color=(245, 200, 66), thickness=2, circle_radius=3),
-                connection_drawing_spec=mp.solutions.drawing_utils.DrawingSpec(color=(255, 255, 255), thickness=2)
+            self.mp_drawing.draw_landmarks(
+                img, res.pose_landmarks, self.mp_pose.POSE_CONNECTIONS,
+                landmark_drawing_spec=self.mp_drawing.DrawingSpec(color=(245, 200, 66), thickness=2, circle_radius=3),
+                connection_drawing_spec=self.mp_drawing.DrawingSpec(color=(255, 255, 255), thickness=2)
             )
             
-            # Extract landmarks for math
             lms = res.pose_landmarks.landmark
-            shoulder = [lms[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value].x, lms[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value].y]
-            hip = [lms[mp.solutions.pose.PoseLandmark.LEFT_HIP.value].x, lms[mp.solutions.pose.PoseLandmark.LEFT_HIP.value].y]
-            knee = [lms[mp.solutions.pose.PoseLandmark.LEFT_KNEE.value].x, lms[mp.solutions.pose.PoseLandmark.LEFT_KNEE.value].y]
-            ankle = [lms[mp.solutions.pose.PoseLandmark.LEFT_ANKLE.value].x, lms[mp.solutions.pose.PoseLandmark.LEFT_ANKLE.value].y]
+            # Get key points
+            try:
+                shoulder = [lms[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].x, lms[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
+                hip = [lms[self.mp_pose.PoseLandmark.LEFT_HIP.value].x, lms[self.mp_pose.PoseLandmark.LEFT_HIP.value].y]
+                knee = [lms[self.mp_pose.PoseLandmark.LEFT_KNEE.value].x, lms[self.mp_pose.PoseLandmark.LEFT_KNEE.value].y]
+                ankle = [lms[self.mp_pose.PoseLandmark.LEFT_ANKLE.value].x, lms[self.mp_pose.PoseLandmark.LEFT_ANKLE.value].y]
 
-            # Biomechanics Check (Zhambas Example: back straight > 160, knees bent < 130)
-            back_angle = calculate_angle(shoulder, hip, knee)
-            knee_angle = calculate_angle(hip, knee, ankle)
-            
-            is_correct = (back_angle > 150) and (knee_angle < 140)
-            
-            if is_correct:
-                self._correct_frames += 1
-                status = "HOLD..."
-                color = (0, 200, 255) # Yellow
+                back_angle = calculate_angle(shoulder, hip, knee)
+                knee_angle = calculate_angle(hip, knee, ankle)
                 
-                if self._correct_frames > 20 and self._cooldown == 0:
-                    # IA specific: Add to global state
-                    st.session_state["xp"] += 15
-                    st.session_state["reps"] += 1
-                    self._cooldown = 40
+                # Check posture
+                if back_angle > 150 and knee_angle < 145:
+                    self._correct_frames += 1
+                    status = "GOOD! HOLD..."
+                    color = (0, 200, 255)
+                    
+                    if self._correct_frames > 25 and self._cooldown == 0:
+                        st.session_state["xp"] += 15
+                        st.session_state["reps"] += 1
+                        self._cooldown = 30
+                        self._correct_frames = 0
+                else:
                     self._correct_frames = 0
-            else:
-                self._correct_frames = 0
-                status = "CORRECT YOUR POSTURE"
-                color = (0, 100, 255) # Orange
+                    status = "FIX FORM"
+                    color = (0, 100, 255)
+            except:
+                pass
                 
             if self._cooldown > 0:
                 self._cooldown -= 1
-                status = "PERFECT FORM! +15 XP"
-                color = (0, 255, 100) # Green
+                status = "POINT EARNED!"
+                color = (0, 255, 100)
 
-        # Add text background for readability
-        cv2.rectangle(img, (10, h - 60), (600, h - 10), (0,0,0), -1)
-        cv2.putText(img, status, (20, h-25), cv2.FONT_HERSHEY_DUPLEX, 1.0, color, 2)
+        cv2.rectangle(img, (0, h - 80), (450, h), (0,0,0), -1)
+        cv2.putText(img, status, (20, h-30), cv2.FONT_HERSHEY_DUPLEX, 1.2, color, 2)
         
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
@@ -149,7 +151,6 @@ class WrestlingCoach(VideoProcessorBase):
 st.title("🦅 SHEBER APP PRO")
 st.markdown("### National Wrestling AI Analyst")
 
-# Top Section: Stats
 xp = st.session_state["xp"]
 rank_name, emoji = "Bala", "🥋"
 for lo, hi, n, e in RANKS:
@@ -157,45 +158,43 @@ for lo, hi, n, e in RANKS:
 
 c1, c2, c3 = st.columns(3)
 with c1:
-    st.markdown(f"<div class='rank-card'><small>LEVEL</small><div class='rank-name'>{emoji} {rank_name}</div></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='rank-card'><small>RANK</small><div class='rank-name'>{emoji} {rank_name}</div></div>", unsafe_allow_html=True)
 with c2:
-    prog = min((xp % 400) / 400, 1.0) # Scaled for visual progress
-    st.markdown(f"<div class='rank-card'><small>PROGRESS</small><div class='xp-value'>{xp} XP</div><div class='xp-bar-bg'><div class='xp-bar-fg' style='width:{int(prog*100)}%'></div></div></div>", unsafe_allow_html=True)
+    prog = min((xp % 400) / 400, 1.0)
+    st.markdown(f"<div class='rank-card'><small>TOTAL XP</small><div class='xp-value'>{xp}</div><div class='xp-bar-bg'><div class='xp-bar-fg' style='width:{int(prog*100)}%'></div></div></div>", unsafe_allow_html=True)
 with c3:
-    st.markdown(f"<div class='rank-card'><small>SUCCESSFUL REPS</small><div class='xp-value'>{st.session_state['reps']}</div></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='rank-card'><small>REPS</small><div class='xp-value'>{st.session_state['reps']}</div></div>", unsafe_allow_html=True)
 
 st.divider()
 
-# Main Training Section
 col_left, col_right = st.columns([1.5, 1])
 
 with col_left:
     st.markdown("#### 📸 LIVE AI SCANNER")
     webrtc_streamer(
-        key="pro-coach", 
+        key="wrestling-scanner", 
         video_processor_factory=WrestlingCoach, 
         rtc_configuration=RTC_CONFIG,
-        media_stream_constraints={"video": True, "audio": False}
+        media_stream_constraints={"video": True, "audio": False},
+        async_processing=True
     )
 
 with col_right:
-    st.markdown("#### 📖 Select Technique")
-    st.session_state["throw"] = st.selectbox("", ["Zhambas", "Shalu", "Koterme"], label_visibility="collapsed")
+    st.markdown("#### 📖 Technique Guide")
+    tech = st.selectbox("Choose Technique", ["Zhambas", "Shalu", "Koterme"])
+    st.session_state["throw"] = tech
     
-    # ИСПРАВЛЕННЫЕ ИМЕНА ФАЙЛОВ ИЗ ТВОЕГО GITHUB:
-    t = st.session_state["throw"]
-    if t == "Zhambas":
-        st.image("jambass.jpg", caption="Zhambas - Optimal Hip Position", use_container_width=True)
-        st.info("💡 Keep your back at >150° and knees bent at <140° for max leverage.")
-    elif t == "Shalu":
-        st.image("shalu.jpg", caption="Shalu - Leg Sweep Execution", use_container_width=True)
-        st.info("💡 Fully extend your leg and ensure the ankle sweep is sharp.")
+    if tech == "Zhambas":
+        st.image("jambass.jpg", caption="Zhambas Guide", use_container_width=True)
+        st.warning("Keep hips low and back straight.")
+    elif tech == "Shalu":
+        st.image("shalu.jpg", caption="Shalu Guide", use_container_width=True)
+        st.warning("Focus on the ankle sweep timing.")
     else:
-        st.image("koterme.webp", caption="Koterme - The Power Lift", use_container_width=True)
-        st.info("💡 Use your legs! Deep squat and keep your chest up.")
+        st.image("koterme.webp", caption="Koterme Guide", use_container_width=True)
+        st.warning("Use explosive leg power to lift.")
 
-    st.divider()
-    if st.button("RESET TRAINING DATA", use_container_width=True):
+    if st.button("RESET SESSION"):
         st.session_state.update({"xp": 0, "reps": 0})
         st.rerun()
 
