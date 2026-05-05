@@ -1,21 +1,21 @@
-import av
-import cv2
-import numpy as np
-import streamlit as st
-import mediapipe as mp
 import os
 import urllib.request
+import streamlit as st
+import mediapipe as mp
+import cv2
+import numpy as np
+import av
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration, WebRtcMode
 
-# 1. СТРОГАЯ КОНФИГУРАЦИЯ
+# 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
 st.set_page_config(
-    page_title="SHEBER AI",
+    page_title="SHEBER AI PRO",
     page_icon="🦅",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# 2. ИСПРАВЛЕНИЕ PERMISSION ERROR (Загрузка в /tmp)
+# 2. ИСПРАВЛЕНИЕ PERMISSION ERROR (Скачивание модели в разрешенную папку /tmp)
 @st.cache_resource
 def get_mp_pose():
     model_dir = "/tmp/mediapipe_models"
@@ -36,6 +36,7 @@ def get_mp_pose():
         min_tracking_confidence=0.5
     )
 
+# Инициализация модели и инструментов рисования
 pose_model = get_mp_pose()
 mp_drawing = mp.solutions.drawing_utils
 mp_pose = mp.solutions.pose
@@ -62,7 +63,6 @@ st.markdown("""
         padding: 20px;
         text-align: center;
         backdrop-filter: blur(15px);
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     }
     .metric-val {
         font-family: 'Orbitron', sans-serif;
@@ -71,13 +71,8 @@ st.markdown("""
         text-shadow: 0 0 10px rgba(245, 200, 66, 0.5);
     }
     .xp-outer { background: rgba(255,255,255,0.1); border-radius: 10px; height: 10px; margin-top: 10px; overflow: hidden; }
-    .xp-inner { background: linear-gradient(90deg, #f5c842, #ffae00); height: 100%; box-shadow: 0 0 15px #f5c842; }
-    .video-box {
-        border: 2px solid #f5c842;
-        border-radius: 25px;
-        overflow: hidden;
-        box-shadow: 0 0 40px rgba(245, 200, 66, 0.15);
-    }
+    .xp-inner { background: linear-gradient(90deg, #f5c842, #ffae00); height: 100%; }
+    .video-box { border: 2px solid #f5c842; border-radius: 25px; overflow: hidden; }
     [data-testid="stSidebar"] { background-color: #0a0f18; border-right: 1px solid rgba(245, 200, 66, 0.2); }
     .stButton>button {
         width: 100%;
@@ -90,10 +85,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. СЕТЕВЫЕ НАСТРОЙКИ
+# 4. СЕТЬ
 RTC_CONFIG = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
 
-# 5. СОСТОЯНИЕ
+# 5. ДАННЫЕ СЕССИИ
 if "xp" not in st.session_state:
     st.session_state.update({"xp": 0, "reps": 0, "name": "Batyr", "move": "Zhambas"})
 
@@ -102,7 +97,7 @@ class SheberAI(VideoProcessorBase):
     def __init__(self):
         self.pose = pose_model
         self.stage = None
-        self.hint = "GET READY"
+        self.hint = "READY"
 
     def calculate_angle(self, a, b, c):
         a, b, c = np.array(a), np.array(b), np.array(c)
@@ -126,6 +121,7 @@ class SheberAI(VideoProcessorBase):
             
             try:
                 lms = results.pose_landmarks.landmark
+                # Логика подсчета (на примере левой стороны)
                 hip = [lms[mp_pose.PoseLandmark.LEFT_HIP.value].x, lms[mp_pose.PoseLandmark.LEFT_HIP.value].y]
                 knee = [lms[mp_pose.PoseLandmark.LEFT_KNEE.value].x, lms[mp_pose.PoseLandmark.LEFT_KNEE.value].y]
                 ankle = [lms[mp_pose.PoseLandmark.LEFT_ANKLE.value].x, lms[mp_pose.PoseLandmark.LEFT_ANKLE.value].y]
@@ -142,23 +138,23 @@ class SheberAI(VideoProcessorBase):
                     self.hint = "PERFECT!"
             except: pass
 
-        # Отрисовка HUD
+        # Отрисовка HUD прямо на видео
         cv2.rectangle(img, (0, 0), (w, 60), (0, 0, 0), -1)
         cv2.putText(img, f"WARRIOR: {st.session_state['name']}", (20, 40), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(img, f"MOVE: {st.session_state['move']}", (w//2 - 70, 40), 
+        cv2.putText(img, f"TASK: {st.session_state['move']}", (w//2 - 60, 40), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (245, 200, 66), 2)
-        cv2.putText(img, self.hint, (w-180, 40), 
+        cv2.putText(img, self.hint, (w-150, 40), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-# 7. ИНТЕРФЕЙС
+# 7. ГЛАВНЫЙ ИНТЕРФЕЙС
 def main():
     with st.sidebar:
-        st.markdown("### 🛠️ PROFILE SETUP")
+        st.markdown("### 🛠️ PROFILE")
         st.session_state["name"] = st.text_input("Warrior Name", value=st.session_state["name"])
-        # ОСТАВИЛИ 3 БРОСКА
+        # ТОЛЬКО 3 БРОСКА
         st.session_state["move"] = st.selectbox("Select Drill", ["Zhambas", "Shalu", "Koterme"])
         st.write("---")
         if st.button("RESET SESSION"):
@@ -167,8 +163,7 @@ def main():
             st.rerun()
 
     st.markdown("<h1 class='hero-title'>🦅 SHEBER AI PRO</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p style='text-align:center; color:#888;'>Master of Kuresh: <b>{st.session_state['name']}</b> | Drill: <b>{st.session_state['move']}</b></p>", unsafe_allow_html=True)
-
+    
     # Статистика
     xp = st.session_state["xp"]
     rank = "BALA" if xp < 100 else ("ZHASOSPIRIM" if xp < 500 else "BATYR")
@@ -182,25 +177,25 @@ def main():
     c3.markdown(f"<div class='metric-card'><small>REPS</small><div class='metric-val' style='color:#4db8ff;'>{st.session_state['reps']}</div></div>", unsafe_allow_html=True)
 
     st.write(" ")
-
     col_vid, col_guide = st.columns([1.8, 1])
 
     with col_vid:
-        st.markdown(f"### 🛰️ LIVE SCANNER: {st.session_state['move']}")
+        st.markdown(f"### 🛰️ LIVE: {st.session_state['move']}")
         st.markdown('<div class="video-box">', unsafe_allow_html=True)
         webrtc_streamer(
-            key="sheber-pro-v1",
+            key="sheber-final",
             mode=WebRtcMode.SENDRECV,
             rtc_configuration=RTC_CONFIG,
             video_processor_factory=SheberAI,
-            media_stream_constraints={"video": {"width": 1280, "height": 720}, "audio": False},
+            media_stream_constraints={"video": True, "audio": False},
             async_processing=True,
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_guide:
-        st.markdown("### 📘 SENSEI GUIDE")
+        st.markdown("### 📘 GUIDE")
         move = st.session_state["move"]
+        # Используем твои файлы из репозитория
         img_map = {"Zhambas": "jambass.jpg", "Shalu": "shalu.jpg", "Koterme": "koterme.webp"}
         st.image(img_map.get(move, "hero.jpg"), use_container_width=True)
         
