@@ -1,32 +1,29 @@
-import av
-import cv2
-import numpy as np
-import streamlit as st
-import mediapipe as mp
-import urllib.request
 import os
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration, WebRtcMode
+import urllib.request
+import mediapipe as mp
 
-# 1. КОНФИГУРАЦИЯ
-st.set_page_config(
-    page_title="SHEBER AI PRO",
-    page_icon="🦅",
-    layout="wide"
-)
-
-# 2. FIX FOR PERMISSION ERROR (DOWNLOAD TO TMP)
 @st.cache_resource
 def get_mp_pose():
-    # На Streamlit Cloud запись разрешена только в /tmp
-    model_path = "/tmp/pose_landmark_lite.tflite"
+    # Путь к папке, где разрешена запись на Streamlit Cloud
+    model_dir = "/tmp/mediapipe_models"
+    model_path = os.path.join(model_dir, "pose_landmark_lite.tflite")
+    
+    # Если папки нет — создаем
+    if not os.path.exists(model_dir):
+        os.makedirs(model_dir)
+        
+    # Ссылка на официальную модель Google
     model_url = "https://storage.googleapis.com/mediapipe-assets/pose_landmark_lite.tflite"
     
+    # Скачиваем файл вручную, если его еще нет
     if not os.path.exists(model_path):
-        with st.spinner("Initializing AI Engine... (Downloading model)"):
+        with st.spinner("Загрузка AI-модели..."):
             urllib.request.urlretrieve(model_url, model_path)
-    
+
+    # Инициализируем Pose. 
+    # ВАЖНО: MediaPipe подхватит локальный файл, если он в рабочей директории или /tmp
     return mp.solutions.pose.Pose(
-        model_complexity=0,
+        model_complexity=0, # Используем lite (complexity 0)
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5
     )
