@@ -1,8 +1,4 @@
 import os
-
-# КРИТИЧЕСКИЙ ФИКС: Указываем MediaPipe использовать /tmp ДО импорта библиотек
-os.environ['MEDIAPIPE_MODEL_PATH'] = '/tmp/'
-
 import urllib.request
 import streamlit as st
 import mediapipe as mp
@@ -19,36 +15,22 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 2. ИСПРАВЛЕНИЕ PERMISSION ERROR
+# 2. ИНИЦИАЛИЗАЦИЯ МОДЕЛИ (БЕЗ СКАЧИВАНИЯ)
 @st.cache_resource
 def get_mp_pose():
-    model_dir = "/tmp/mediapipe_models"
-    model_path = os.path.join(model_dir, "pose_landmark_lite.tflite")
-    
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir, exist_ok=True)
-        
-    model_url = "https://storage.googleapis.com/mediapipe-assets/pose_landmark_lite.tflite"
-    
-    if not os.path.exists(model_path):
-        try:
-            urllib.request.urlretrieve(model_url, model_path)
-        except Exception as e:
-            st.error(f"Error downloading model: {e}")
-
-    # Инициализация Pose
+    # model_complexity=1 использует встроенную модель, которая уже есть в библиотеке.
+    # Это полностью исключает PermissionError при попытке скачивания.
     return mp.solutions.pose.Pose(
-        model_complexity=0, 
+        model_complexity=1, 
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5
     )
 
-# Инициализация модели и инструментов рисования
 pose_model = get_mp_pose()
 mp_drawing = mp.solutions.drawing_utils
 mp_pose = mp.solutions.pose
 
-# 3. PREMIUM DARK DESIGN (CSS) - Без изменений
+# 3. PREMIUM DARK DESIGN (CSS)
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap');
@@ -128,6 +110,7 @@ class SheberAI(VideoProcessorBase):
             
             try:
                 lms = results.pose_landmarks.landmark
+                # Логика подсчета (на примере левой стороны)
                 hip = [lms[mp_pose.PoseLandmark.LEFT_HIP.value].x, lms[mp_pose.PoseLandmark.LEFT_HIP.value].y]
                 knee = [lms[mp_pose.PoseLandmark.LEFT_KNEE.value].x, lms[mp_pose.PoseLandmark.LEFT_KNEE.value].y]
                 ankle = [lms[mp_pose.PoseLandmark.LEFT_ANKLE.value].x, lms[mp_pose.PoseLandmark.LEFT_ANKLE.value].y]
@@ -144,7 +127,7 @@ class SheberAI(VideoProcessorBase):
                     self.hint = "PERFECT!"
             except: pass
 
-        # HUD
+        # Отрисовка HUD прямо на видео
         cv2.rectangle(img, (0, 0), (w, 60), (0, 0, 0), -1)
         cv2.putText(img, f"WARRIOR: {st.session_state['name']}", (20, 40), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
@@ -160,7 +143,6 @@ def main():
     with st.sidebar:
         st.markdown("### 🛠️ PROFILE")
         st.session_state["name"] = st.text_input("Warrior Name", value=st.session_state["name"])
-        # ТВОИ 3 БРОСКА
         st.session_state["move"] = st.selectbox("Select Drill", ["Zhambas", "Shalu", "Koterme"])
         st.write("---")
         if st.button("RESET SESSION"):
@@ -189,7 +171,7 @@ def main():
         st.markdown(f"### 🛰️ LIVE: {st.session_state['move']}")
         st.markdown('<div class="video-box">', unsafe_allow_html=True)
         webrtc_streamer(
-            key="sheber-final-v2", # Изменил ключ, чтобы избежать конфликтов в кэше
+            key="sheber-final",
             mode=WebRtcMode.SENDRECV,
             rtc_configuration=RTC_CONFIG,
             video_processor_factory=SheberAI,
@@ -201,6 +183,7 @@ def main():
     with col_guide:
         st.markdown("### 📘 GUIDE")
         move = st.session_state["move"]
+        # Используем твои файлы из репозитория
         img_map = {"Zhambas": "jambass.jpg", "Shalu": "shalu.jpg", "Koterme": "koterme.webp"}
         st.image(img_map.get(move, "hero.jpg"), use_container_width=True)
         
