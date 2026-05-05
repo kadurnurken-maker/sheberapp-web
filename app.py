@@ -3,21 +3,30 @@ import cv2
 import numpy as np
 import streamlit as st
 import mediapipe as mp
+import urllib.request
+import os
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration, WebRtcMode
 
-# 1. СТРОГАЯ КОНФИГУРАЦИЯ
+# 1. КОНФИГУРАЦИЯ
 st.set_page_config(
     page_title="SHEBER AI PRO",
     page_icon="🦅",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# 2. ИСПРАВЛЕНИЕ PERMISSION ERROR (Кэшируем модель вне класса)
+# 2. FIX FOR PERMISSION ERROR (DOWNLOAD TO TMP)
 @st.cache_resource
 def get_mp_pose():
+    # На Streamlit Cloud запись разрешена только в /tmp
+    model_path = "/tmp/pose_landmark_lite.tflite"
+    model_url = "https://storage.googleapis.com/mediapipe-assets/pose_landmark_lite.tflite"
+    
+    if not os.path.exists(model_path):
+        with st.spinner("Initializing AI Engine... (Downloading model)"):
+            urllib.request.urlretrieve(model_url, model_path)
+    
     return mp.solutions.pose.Pose(
-        model_complexity=0, 
+        model_complexity=0,
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5
     )
@@ -29,88 +38,44 @@ mp_pose = mp.solutions.pose
 # 3. PREMIUM DARK DESIGN (CSS)
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap');
-
-    .stApp { background: #05070a; color: #ffffff; font-family: 'Inter', sans-serif; }
-    
-    /* Заголовок с неоновым градиентом */
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&family=Inter:wght@400;600&display=swap');
+    .stApp { background: #05070a; color: white; font-family: 'Inter', sans-serif; }
     .hero-title {
         font-family: 'Orbitron', sans-serif;
         background: linear-gradient(90deg, #f5c842, #ffae00);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        font-size: 3.2rem;
+        font-size: 3rem;
         font-weight: 900;
         text-align: center;
-        margin-bottom: 0px;
-        filter: drop-shadow(0 0 10px rgba(245, 200, 66, 0.3));
+        filter: drop-shadow(0 0 10px rgba(245, 200, 66, 0.4));
     }
-
-    /* Стеклянные карточки статистики */
     .metric-card {
         background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(245, 200, 66, 0.2);
-        border-radius: 20px;
-        padding: 20px;
+        border: 1px solid rgba(245, 200, 66, 0.3);
+        border-radius: 15px;
+        padding: 15px;
         text-align: center;
-        backdrop-filter: blur(15px);
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(10px);
     }
-    
-    .metric-val {
-        font-family: 'Orbitron', sans-serif;
-        font-size: 1.8rem;
-        color: #f5c842;
-        text-shadow: 0 0 10px rgba(245, 200, 66, 0.5);
-    }
-
-    /* Прогресс бар */
-    .xp-outer { background: rgba(255,255,255,0.1); border-radius: 10px; height: 10px; margin-top: 10px; overflow: hidden; }
-    .xp-inner { background: linear-gradient(90deg, #f5c842, #ffae00); height: 100%; box-shadow: 0 0 15px #f5c842; }
-
-    /* Рамка для видео */
-    .video-box {
-        border: 2px solid #f5c842;
-        border-radius: 25px;
-        overflow: hidden;
-        box-shadow: 0 0 40px rgba(245, 200, 66, 0.15);
-    }
-
-    /* Сайдбар */
-    [data-testid="stSidebar"] { background-color: #0a0f18; border-right: 1px solid rgba(245, 200, 66, 0.2); }
-    
-    /* Кнопки */
-    .stButton>button {
-        width: 100%;
-        background: linear-gradient(90deg, #f5c842, #ffae00) !important;
-        color: black !important;
-        font-weight: 700 !important;
-        border-radius: 12px !important;
-        border: none !important;
-        font-family: 'Orbitron', sans-serif;
-    }
+    .metric-val { font-family: 'Orbitron', sans-serif; font-size: 1.5rem; color: #f5c842; }
+    .video-box { border: 2px solid #f5c842; border-radius: 20px; overflow: hidden; }
+    [data-testid="stSidebar"] { background-color: #0a0f18; }
 </style>
 """, unsafe_allow_html=True)
 
-# 4. СЕРВЕРЫ СВЯЗИ (Для уменьшения задержки)
-RTC_CONFIG = RTCConfiguration(
-    {"iceServers": [
-        {"urls": ["stun:stun.l.google.com:19302"]},
-        {"urls": ["stun:stun1.l.google.com:19302"]},
-        {"urls": ["stun:stun2.l.google.com:19302"]}
-    ]}
-)
-
-# 5. ИНИЦИАЛИЗАЦИЯ ДАННЫХ
+# 4. ИНИЦИАЛИЗАЦИЯ
 if "xp" not in st.session_state:
     st.session_state.update({"xp": 0, "reps": 0, "name": "Batyr", "move": "Zhambas"})
 
-# 6. AI ENGINE
+RTC_CONFIG = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
+
+# 5. AI ENGINE
 class SheberAI(VideoProcessorBase):
     def __init__(self):
         self.pose = pose_model
         self.stage = None
-        self.hint = "GET READY"
+        self.hint = "READY"
 
     def calculate_angle(self, a, b, c):
         a, b, c = np.array(a), np.array(b), np.array(c)
@@ -126,21 +91,14 @@ class SheberAI(VideoProcessorBase):
         results = self.pose.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
 
         if results.pose_landmarks:
-            mp_drawing.draw_landmarks(
-                img, results.pose_landmarks, mp_pose.POSE_CONNECTIONS,
-                mp_drawing.DrawingSpec(color=(245, 200, 66), thickness=2, circle_radius=2),
-                mp_drawing.DrawingSpec(color=(255, 255, 255), thickness=1)
-            )
-            
+            mp_drawing.draw_landmarks(img, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
             try:
                 lms = results.pose_landmarks.landmark
-                # Анализируем колено для приседа/броска
                 hip = [lms[mp_pose.PoseLandmark.LEFT_HIP.value].x, lms[mp_pose.PoseLandmark.LEFT_HIP.value].y]
                 knee = [lms[mp_pose.PoseLandmark.LEFT_KNEE.value].x, lms[mp_pose.PoseLandmark.LEFT_KNEE.value].y]
                 ankle = [lms[mp_pose.PoseLandmark.LEFT_ANKLE.value].x, lms[mp_pose.PoseLandmark.LEFT_ANKLE.value].y]
                 
                 angle = self.calculate_angle(hip, knee, ankle)
-
                 if angle < 110: 
                     self.stage = "down"
                     self.hint = "PUSH UP!"
@@ -148,88 +106,57 @@ class SheberAI(VideoProcessorBase):
                     self.stage = "up"
                     st.session_state["xp"] += 10
                     st.session_state["reps"] += 1
-                    self.hint = "PERFECT!"
+                    self.hint = "NICE!"
             except: pass
 
-        # Отрисовка HUD (Прозрачный оверлей)
-        cv2.rectangle(img, (0, 0), (w, 60), (0, 0, 0), -1)
-        cv2.putText(img, f"WARRIOR: {st.session_state['name']}", (20, 40), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(img, f"TASK: {st.session_state['move']}", (w//2 - 50, 40), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (245, 200, 66), 2)
-        cv2.putText(img, self.hint, (w-180, 40), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
+        # HUD
+        cv2.putText(img, f"LVL: {st.session_state['reps']//10} | {self.hint}", (20, 50), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (245, 200, 66), 2)
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-# 7. ГЛАВНЫЙ ИНТЕРФЕЙС
+# 6. UI
 def main():
-    # Сайдбар настройки
     with st.sidebar:
-        st.markdown("### 🛠️ PROFILE SETUP")
-        st.session_state["name"] = st.text_input("Warrior Name", value="Batyr")
+        st.markdown("### 🛠️ SETTINGS")
+        st.session_state["name"] = st.text_input("Warrior Name", value=st.session_state["name"])
         st.session_state["move"] = st.selectbox("Select Drill", ["Zhambas", "Shalu", "Koterme", "Belbeu"])
-        st.write("---")
-        if st.button("RESET SESSION"):
+        if st.button("RESET"):
             st.session_state.xp = 0
             st.session_state.reps = 0
             st.rerun()
 
     st.markdown("<h1 class='hero-title'>🦅 SHEBER AI PRO</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p style='text-align:center; color:#888;'>Master of Kuresh: <b>{st.session_state['name']}</b> | Drill: <b>{st.session_state['move']}</b></p>", unsafe_allow_html=True)
-
-    # Панель статистики
-    xp = st.session_state["xp"]
-    rank = "BALA"
-    if xp > 100: rank = "ZHASOSPIRIM"
-    if xp > 500: rank = "BATYR"
     
-    goal = 100 if xp < 100 else (500 if xp < 500 else 1500)
-    prog = min((xp / goal) * 100, 100)
-
+    # Stats
+    xp = st.session_state["xp"]
+    rank = "BALA" if xp < 100 else ("BATYR" if xp < 500 else "SHEBER")
+    
     c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown(f"<div class='metric-card'><small>RANK</small><div class='metric-val'>🥋 {rank}</div></div>", unsafe_allow_html=True)
-    with c2:
-        st.markdown(f"""<div class='metric-card'><small>EXPERIENCE</small><div class='metric-val'>{xp} XP</div>
-        <div class='xp-outer'><div class='xp-inner' style='width:{prog}%'></div></div></div>""", unsafe_allow_html=True)
-    with c3:
-        st.markdown(f"<div class='metric-card'><small>REPS</small><div class='metric-val' style='color:#4db8ff;'>{st.session_state['reps']}</div></div>", unsafe_allow_html=True)
+    c1.markdown(f"<div class='metric-card'><small>RANK</small><div class='metric-val'>🥋 {rank}</div></div>", unsafe_allow_html=True)
+    c2.markdown(f"<div class='metric-card'><small>XP</small><div class='metric-val'>{xp}</div></div>", unsafe_allow_html=True)
+    c3.markdown(f"<div class='metric-card'><small>REPS</small><div class='metric-val'>{st.session_state['reps']}</div></div>", unsafe_allow_html=True)
 
-    st.write(" ")
-
-    # Рабочая зона
-    col_vid, col_guide = st.columns([1.8, 1])
-
-    with col_vid:
-        st.markdown(f"### 🛰️ LIVE SCANNER: {st.session_state['move']}")
+    st.write("---")
+    
+    col_v, col_g = st.columns([2, 1])
+    with col_v:
         st.markdown('<div class="video-box">', unsafe_allow_html=True)
         webrtc_streamer(
-            key="sheber-v4",
+            key="sheber-stream",
             mode=WebRtcMode.SENDRECV,
             rtc_configuration=RTC_CONFIG,
             video_processor_factory=SheberAI,
-            media_stream_constraints={"video": {"width": 1280, "height": 720}, "audio": False},
+            media_stream_constraints={"video": True, "audio": False},
             async_processing=True,
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
-    with col_guide:
-        st.markdown("### 📘 SENSEI GUIDE")
-        move = st.session_state["move"]
+    with col_g:
+        st.markdown("### 📘 GUIDE")
+        # Тут используем твои картинки (убедись, что они в репозитории)
         img_map = {"Zhambas": "jambass.jpg", "Shalu": "shalu.jpg", "Koterme": "koterme.webp", "Belbeu": "hero.jpg"}
-        st.image(img_map.get(move, "hero.jpg"), use_container_width=True)
-        
-        tips = {
-            "Zhambas": "Держи спину ровно при подседе. Взрыв должен идти от бедер.",
-            "Shalu": "Используй инерцию противника. Зацеп должен быть молниеносным.",
-            "Koterme": "Это силовой прием. Контролируй захват пояса до конца.",
-            "Belbeu": "Прижимай противника плотнее, не давай ему пространства."
-        }
-        st.success(f"**Совет:** {tips.get(move)}")
-
-    st.write("---")
-    st.image("hero.jpg", use_container_width=True)
+        st.image(img_map.get(st.session_state["move"], "hero.jpg"), use_container_width=True)
+        st.info(f"Тренировка: {st.session_state['move']}. Следите за углом в коленях!")
 
 if __name__ == "__main__":
     main()
