@@ -1,194 +1,155 @@
-import av
-import cv2
-import numpy as np
-import streamlit as st
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
-
-# 1. СТРОГАЯ КОНФИГУРАЦИЯ
-st.set_page_config(page_title="SheberApp Pro", page_icon="🦅", layout="wide")
-
-# 2. УЛУЧШЕННЫЙ ULTRA DESIGN (CSS)
+# ── НОВЫЙ PRO DESIGN (CSS) ──
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Montserrat:wght@300;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Montserrat:wght@300;500;700&display=swap');
 
-    /* Основной фон */
+    /* Фон и общие настройки */
     .stApp {
-        background: radial-gradient(circle at top right, #0a0f1a, #020408);
+        background: #05070a;
         color: #e0e0e0;
         font-family: 'Montserrat', sans-serif;
     }
 
-    /* Заголовки в стиле Киберпанк */
-    h1, h2, h3 {
-        font-family: 'Orbitron', sans-serif;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        color: #f5c842 !important;
-        text-shadow: 0 0 15px rgba(245, 200, 66, 0.3);
-    }
-
-    /* Контейнеры статистики */
-    .metric-container {
+    /* Стеклянные карточки для статистики */
+    .metric-card {
         background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(245, 200, 66, 0.2);
-        border-radius: 20px;
-        padding: 20px;
-        text-align: center;
-        backdrop-filter: blur(10px);
-        transition: 0.3s;
-    }
-    .metric-container:hover {
-        border-color: #f5c842;
-        box-shadow: 0 0 20px rgba(245, 200, 66, 0.1);
-    }
-
-    .metric-label { font-size: 0.8rem; color: #888; text-transform: uppercase; }
-    .metric-value { font-size: 2rem; font-weight: 700; color: #ffffff; }
-
-    /* Видео и Картинки */
-    .stImage, .element-container iframe {
+        border: 1px solid rgba(245, 200, 66, 0.1);
         border-radius: 15px;
-        border: 2px solid rgba(255,255,255,0.1);
+        padding: 15px;
+        text-align: center;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    }
+    
+    .rank-text { 
+        font-family: 'Orbitron', sans-serif; 
+        color: #f5c842; 
+        font-size: 1.5rem; 
+        font-weight: bold;
+        text-shadow: 0 0 10px rgba(245, 200, 66, 0.2);
     }
 
-    /* Кнопки */
-    .stButton>button {
-        width: 100%;
-        background: linear-gradient(90deg, #f5c842, #ffae00);
-        color: black !important;
-        font-weight: 700;
-        border: none;
+    /* Кастомный прогресс-бар */
+    .progress-container {
+        background: rgba(255,255,255,0.05);
         border-radius: 10px;
-        padding: 10px;
-        transition: 0.3s;
+        height: 8px;
+        margin-top: 10px;
+    }
+    .progress-fill {
+        background: linear-gradient(90deg, #f5c842, #ffae00);
+        height: 100%;
+        border-radius: 10px;
+        box-shadow: 0 0 10px #f5c842;
+    }
+
+    /* Рамка для сканера */
+    .scanner-box {
+        border: 2px solid #f5c842;
+        border-radius: 20px;
+        padding: 5px;
+        background: #000;
+    }
+
+    /* Стиль кнопок */
+    .stButton>button {
+        border-radius: 8px !important;
+        background: transparent !important;
+        border: 1px solid #f5c842 !important;
+        color: #f5c842 !important;
+        transition: 0.3s !important;
     }
     .stButton>button:hover {
-        transform: scale(1.02);
-        box-shadow: 0 0 15px #f5c842;
+        background: #f5c842 !important;
+        color: black !important;
     }
+    
+    /* Убираем лишние отступы Streamlit */
+    .block-container { padding-top: 2rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── DATA ──
-RANKS = [(0, 100, "Bala", "🥋"), (101, 400, "Zhasospirim", "⚔️"), (401, 1000, "Batyr", "🦅"), (1001, 9999, "Sheber", "👑")]
-RTC_CONFIG = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
+# ── НОВАЯ ВЕРСТКА ИНТЕРФЕЙСА ──
 
-# ── STATE ──
-if "xp" not in st.session_state:
-    st.session_state.update({"xp": 0, "reps": 0, "throw": "Zhambas"})
+# Верхняя панель: Лого и Статус
+head_l, head_r = st.columns([2, 1])
+with head_l:
+    st.markdown(f"<h1>🦅 SHEBER APP <span style='color:white; font-size:1.2rem;'>PRO v2.0</span></h1>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#888; margin-top:-15px;'>National Kazakh Kures AI Analysis System</p>", unsafe_allow_html=True)
 
-# ── MATH ──
-def calculate_angle(a, b, c):
-    a, b, c = np.array(a), np.array(b), np.array(c)
-    ba, bc = a - b, c - b
-    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
-    return np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
-
-# ── AI ENGINE ──
-class WrestlingCoach(VideoProcessorBase):
-    def __init__(self):
-        # Импорт ВНУТРИ класса решает проблему AttributeError на сервере
-        import mediapipe as mp
-        self.mp_pose = mp.solutions.pose
-        self.mp_drawing = mp.solutions.drawing_utils
-        self.pose = self.mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
-        self._correct_frames = 0
-        self._cooldown = 0
-
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        img = cv2.flip(img, 1)
-        h, w = img.shape[:2]
-        
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        res = self.pose.process(rgb)
-
-        status = "WAINTING FOR SKELETON..."
-        color = (100, 100, 100)
-
-        if res.pose_landmarks:
-            self.mp_drawing.draw_landmarks(
-                img, res.pose_landmarks, self.mp_pose.POSE_CONNECTIONS,
-                landmark_drawing_spec=self.mp_drawing.DrawingSpec(color=(245, 200, 66), thickness=2, circle_radius=2)
-            )
-            
-            try:
-                lms = res.pose_landmarks.landmark
-                # Точки для анализа (Биомеханика)
-                shoulder = [lms[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].x, lms[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
-                hip = [lms[self.mp_pose.PoseLandmark.LEFT_HIP.value].x, lms[self.mp_pose.PoseLandmark.LEFT_HIP.value].y]
-                knee = [lms[self.mp_pose.PoseLandmark.LEFT_KNEE.value].x, lms[self.mp_pose.PoseLandmark.LEFT_KNEE.value].y]
-                
-                angle = calculate_angle(shoulder, hip, knee)
-
-                if angle > 150: # Пример логики для броска
-                    self._correct_frames += 1
-                    status = "READY TO THROW!"
-                    color = (0, 255, 255)
-                    if self._correct_frames > 20 and self._cooldown == 0:
-                        st.session_state["xp"] += 10
-                        st.session_state["reps"] += 1
-                        self._cooldown = 30
-                else:
-                    status = "FIX YOUR BACK"
-                    color = (0, 0, 255)
-            except: pass
-
-        if self._cooldown > 0:
-            self._cooldown -= 1
-            status = "NICE! +10 XP"
-            color = (0, 255, 0)
-
-        cv2.putText(img, status, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
-
-# ── ВЕРСТКА ИНТЕРФЕЙСА ──
-st.title("🦅 SHEBER APP PRO")
-st.write("---")
-
-# Секция статистики
+# Панель статистики в ряд
 xp = st.session_state["xp"]
 rank_name = "Bala"
+emoji = "🥋"
 for lo, hi, n, e in RANKS:
-    if lo <= xp <= hi: rank_name = f"{e} {n}"
+    if lo <= xp <= hi: 
+        rank_name, emoji = n, e
 
-col_rank, col_xp, col_reps = st.columns(3)
-with col_rank:
-    st.markdown(f"<div class='metric-container'><div class='metric-label'>Rank</div><div class='metric-value'>{rank_name}</div></div>", unsafe_allow_html=True)
-with col_xp:
-    st.markdown(f"<div class='metric-container'><div class='metric-label'>Total XP</div><div class='metric-value'>{xp}</div></div>", unsafe_allow_html=True)
-with col_reps:
-    st.markdown(f"<div class='metric-container'><div class='metric-label'>Reps</div><div class='metric-value'>{st.session_state['reps']}</div></div>", unsafe_allow_html=True)
+# Считаем прогресс до следующего уровня (для визуала)
+next_goal = 100 if xp < 100 else (400 if xp < 400 else 1000)
+prog_percent = min((xp / next_goal) * 100, 100)
 
-st.write("")
+s1, s2, s3 = st.columns(3)
+with s1:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div style="font-size:0.7rem; color:#888;">CURRENT RANK</div>
+        <div class="rank-text">{emoji} {rank_name}</div>
+    </div>
+    """, unsafe_allow_html=True)
+with s2:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div style="font-size:0.7rem; color:#888;">EXPERIENCE POINTS</div>
+        <div style="font-size:1.5rem; font-weight:bold;">{xp} XP</div>
+        <div class="progress-container"><div class="progress-fill" style="width:{prog_percent}%"></div></div>
+    </div>
+    """, unsafe_allow_html=True)
+with s3:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div style="font-size:0.7rem; color:#888;">TOTAL SUCCESSFUL REPS</div>
+        <div style="font-size:1.5rem; font-weight:bold; color:#4db8ff;">{st.session_state['reps']}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-# Основной блок (Камера + Инструкция)
-main_left, main_right = st.columns([1.5, 1])
+st.write(" ")
 
-with main_left:
-    st.subheader("📸 AI Scanner")
+# Основная рабочая область
+main_l, main_r = st.columns([1.6, 1])
+
+with main_l:
+    st.markdown("### 📸 AI NEURAL SCANNER")
+    st.markdown('<div class="scanner-box">', unsafe_allow_html=True)
     webrtc_streamer(
         key="wrestling-coach",
         video_processor_factory=WrestlingCoach,
         rtc_configuration=RTC_CONFIG,
         media_stream_constraints={"video": True, "audio": False}
     )
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.caption("Система автоматически фиксирует углы колен и спины в реальном времени.")
 
-with main_right:
-    st.subheader("📖 Technique")
-    tech = st.selectbox("Select Drill", ["Zhambas", "Shalu", "Koterme"])
+with main_r:
+    st.markdown("### 📖 TRAINING GUIDE")
+    tech = st.selectbox("Choose drill to analyze:", ["Zhambas", "Shalu", "Koterme"])
     
-    # Имена файлов должны совпадать с GitHub
+    # Контейнер для фото
     images = {"Zhambas": "jambass.jpg", "Shalu": "shalu.jpg", "Koterme": "koterme.webp"}
     st.image(images[tech], use_container_width=True)
     
-    st.info(f"Focus on your center of gravity while performing {tech}.")
+    # Советы в зависимости от техники
+    tips = {
+        "Zhambas": "Держите спину прямой (>150°). Низкий подсед — ключ к броску.",
+        "Shalu": "Скручивайте корпус одновременно с подсечкой.",
+        "Koterme": "Используйте взрывную силу ног, сохраняя вертикаль корпуса."
+    }
+    st.warning(f"**Coach Tip:** {tips[tech]}")
     
-    if st.button("RESET SESSION"):
+    if st.button("🔄 RESET TRAINING DATA"):
         st.session_state.xp = 0
         st.session_state.reps = 0
         st.rerun()
 
 st.write("---")
+# Нижний баннер
 st.image("hero.jpg", use_container_width=True)
