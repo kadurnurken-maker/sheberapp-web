@@ -9,7 +9,7 @@ from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfigurati
 
 # 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
 st.set_page_config(
-    page_title="SHEBER AI PRO",
+    page_title="SHEBER AI ",
     page_icon="🦅",
     layout="wide",
     initial_sidebar_state="expanded"
