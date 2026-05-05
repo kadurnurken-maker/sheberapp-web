@@ -1,5 +1,4 @@
 import os
-import urllib.request
 import streamlit as st
 import mediapipe as mp
 import cv2
@@ -9,17 +8,15 @@ from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfigurati
 
 # 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
 st.set_page_config(
-    page_title="SHEBER AI ",
+    page_title="SHEBER AI PRO",
     page_icon="🦅",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# 2. ИНИЦИАЛИЗАЦИЯ МОДЕЛИ (БЕЗ СКАЧИВАНИЯ)
+# 2. ИНИЦИАЛИЗАЦИЯ МОДЕЛИ
 @st.cache_resource
 def get_mp_pose():
-    # model_complexity=1 использует встроенную модель, которая уже есть в библиотеке.
-    # Это полностью исключает PermissionError при попытке скачивания.
     return mp.solutions.pose.Pose(
         model_complexity=1, 
         min_detection_confidence=0.5,
@@ -40,23 +37,15 @@ st.markdown("""
         background: linear-gradient(90deg, #f5c842, #ffae00);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        font-size: 3.2rem;
-        font-weight: 900;
-        text-align: center;
+        font-size: 3.2rem; font-weight: 900; text-align: center;
         filter: drop-shadow(0 0 10px rgba(245, 200, 66, 0.3));
     }
     .metric-card {
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(245, 200, 66, 0.2);
-        border-radius: 20px;
-        padding: 20px;
-        text-align: center;
-        backdrop-filter: blur(15px);
+        background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(245, 200, 66, 0.2);
+        border-radius: 20px; padding: 20px; text-align: center; backdrop-filter: blur(15px);
     }
     .metric-val {
-        font-family: 'Orbitron', sans-serif;
-        font-size: 1.8rem;
-        color: #f5c842;
+        font-family: 'Orbitron', sans-serif; font-size: 1.8rem; color: #f5c842;
         text-shadow: 0 0 10px rgba(245, 200, 66, 0.5);
     }
     .xp-outer { background: rgba(255,255,255,0.1); border-radius: 10px; height: 10px; margin-top: 10px; overflow: hidden; }
@@ -64,11 +53,8 @@ st.markdown("""
     .video-box { border: 2px solid #f5c842; border-radius: 25px; overflow: hidden; }
     [data-testid="stSidebar"] { background-color: #0a0f18; border-right: 1px solid rgba(245, 200, 66, 0.2); }
     .stButton>button {
-        width: 100%;
-        background: linear-gradient(90deg, #f5c842, #ffae00) !important;
-        color: black !important;
-        font-weight: 700 !important;
-        border-radius: 12px !important;
+        width: 100%; background: linear-gradient(90deg, #f5c842, #ffae00) !important;
+        color: black !important; font-weight: 700 !important; border-radius: 12px !important;
         font-family: 'Orbitron', sans-serif;
     }
 </style>
@@ -87,6 +73,9 @@ class SheberAI(VideoProcessorBase):
         self.pose = pose_model
         self.stage = None
         self.hint = "READY"
+        # Локальные переменные для потока (мост данных)
+        self.current_name = "Batyr"
+        self.current_move = "Zhambas"
 
     def calculate_angle(self, a, b, c):
         a, b, c = np.array(a), np.array(b), np.array(c)
@@ -110,7 +99,6 @@ class SheberAI(VideoProcessorBase):
             
             try:
                 lms = results.pose_landmarks.landmark
-                # Логика подсчета (на примере левой стороны)
                 hip = [lms[mp_pose.PoseLandmark.LEFT_HIP.value].x, lms[mp_pose.PoseLandmark.LEFT_HIP.value].y]
                 knee = [lms[mp_pose.PoseLandmark.LEFT_KNEE.value].x, lms[mp_pose.PoseLandmark.LEFT_KNEE.value].y]
                 ankle = [lms[mp_pose.PoseLandmark.LEFT_ANKLE.value].x, lms[mp_pose.PoseLandmark.LEFT_ANKLE.value].y]
@@ -122,16 +110,17 @@ class SheberAI(VideoProcessorBase):
                     self.hint = "PUSH UP!"
                 if angle > 160 and self.stage == "down":
                     self.stage = "up"
+                    # Внимание: счетчик может обновляться не мгновенно из-за асинхронности
                     st.session_state["xp"] += 10
                     st.session_state["reps"] += 1
                     self.hint = "PERFECT!"
             except: pass
 
-        # Отрисовка HUD прямо на видео
+        # Отрисовка HUD используем локальные переменные (self.current_name)
         cv2.rectangle(img, (0, 0), (w, 60), (0, 0, 0), -1)
-        cv2.putText(img, f"WARRIOR: {st.session_state['name']}", (20, 40), 
+        cv2.putText(img, f"WARRIOR: {self.current_name}", (20, 40), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(img, f"TASK: {st.session_state['move']}", (w//2 - 60, 40), 
+        cv2.putText(img, f"TASK: {self.current_move}", (w//2 - 60, 40), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (245, 200, 66), 2)
         cv2.putText(img, self.hint, (w-150, 40), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
@@ -152,7 +141,6 @@ def main():
 
     st.markdown("<h1 class='hero-title'>🦅 SHEBER AI PRO</h1>", unsafe_allow_html=True)
     
-    # Статистика
     xp = st.session_state["xp"]
     rank = "BALA" if xp < 100 else ("ZHASOSPIRIM" if xp < 500 else "BATYR")
     goal = 100 if xp < 100 else (500 if xp < 500 else 1500)
@@ -170,20 +158,30 @@ def main():
     with col_vid:
         st.markdown(f"### 🛰️ LIVE: {st.session_state['move']}")
         st.markdown('<div class="video-box">', unsafe_allow_html=True)
-        webrtc_streamer(
-            key="sheber-final",
+        
+        # Захватываем контекст видеостримера
+        ctx = webrtc_streamer(
+            key="sheber-final-opt",
             mode=WebRtcMode.SENDRECV,
             rtc_configuration=RTC_CONFIG,
             video_processor_factory=SheberAI,
-            media_stream_constraints={"video": True, "audio": False},
+            # ОПТИМИЗАЦИЯ: Уменьшаем разрешение до 640x480 (снижает лаги)
+            media_stream_constraints={
+                "video": {"width": 640, "height": 480, "frameRate": 30},
+                "audio": False
+            },
             async_processing=True,
         )
         st.markdown('</div>', unsafe_allow_html=True)
+        
+        # СИНХРОНИЗАЦИЯ ДАННЫХ: Прокидываем имя и прием внутрь видеопотока
+        if ctx.video_processor:
+            ctx.video_processor.current_name = st.session_state["name"]
+            ctx.video_processor.current_move = st.session_state["move"]
 
     with col_guide:
         st.markdown("### 📘 GUIDE")
         move = st.session_state["move"]
-        # Используем твои файлы из репозитория
         img_map = {"Zhambas": "jambass.jpg", "Shalu": "shalu.jpg", "Koterme": "koterme.webp"}
         st.image(img_map.get(move, "hero.jpg"), use_container_width=True)
         
