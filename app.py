@@ -6,52 +6,29 @@ import av
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration, WebRtcMode
 import threading
 
-# 1. ОСНОВНЫЕ НАСТРОЙКИ
-st.set_page_config(page_title="SHEBER", page_icon="🦅", layout="wide")
+# 1. КОНФИГУРАЦИЯ
+st.set_page_config(page_title="SHEBER AI PRO", layout="wide")
 
-# Инициализация данных
-if "xp" not in st.session_state: st.session_state.xp = 0
-if "reps" not in st.session_state: st.session_state.reps = 0
+# Инициализация очков в начале (чтобы не сбрасывались)
+if "xp" not in st.session_state:
+    st.session_state.xp = 0
+if "reps" not in st.session_state:
+    st.session_state.reps = 0
 
-# Мост для передачи данных между видео и интерфейсом
+# Общий замок для передачи данных между ИИ и сайтом
 lock = threading.Lock()
-class SharedData:
-    new_reps = 0
-    new_xp = 0
-shared = SharedData()
+class SharedState:
+    count = 0
+    xp = 0
 
-# 2. ЧИСТЫЙ ДИЗАЙН (CSS)
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;700&display=swap');
-    
-    .stApp { background-color: #0e1117; color: #e0e0e0; font-family: 'Inter', sans-serif; }
-    
-    /* Заголовок */
-    .main-title {
-        font-weight: 700; font-size: 3rem; color: #D4AF37;
-        text-align: center; margin-bottom: 2rem; letter-spacing: 2px;
-    }
-    
-    /* Карточки статистики */
-    .stat-card {
-        background: #1c1f26; border-radius: 15px; padding: 1.5rem;
-        border-top: 3px solid #D4AF37; text-align: center;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-    }
-    .stat-label { font-size: 0.8rem; color: #888; text-transform: uppercase; margin-bottom: 5px; }
-    .stat-value { font-size: 1.8rem; font-weight: 700; color: #ffffff; }
+shared = SharedState()
 
-    /* Видео-контейнер */
-    .video-container { border: 1px solid #30363d; border-radius: 20px; overflow: hidden; }
-</style>
-""", unsafe_allow_html=True)
-
-# 3. ЛОГИКА ТРЕНИРОВКИ (AI)
-class SheberEngine(VideoProcessorBase):
+# 2. AI ENGINE
+class SheberAI(VideoProcessorBase):
     def __init__(self):
-        self.pose = mp.solutions.pose.Pose(model_complexity=0, min_detection_confidence=0.5)
-        self.stage = "up"
+        self.pose = mp.solutions.pose.Pose(model_complexity=0) # 0 для скорости
+        self.stage = None
+        self.hint = "WAITING"
         self.current_move = "Zhambas"
 
     def calculate_angle(self, a, b, c):
@@ -68,80 +45,94 @@ class SheberEngine(VideoProcessorBase):
         if results.pose_landmarks:
             lms = results.pose_landmarks.landmark
             try:
-                # Колено, бедро, лодыжка (для Жамбас)
+                # Точки для анализа
                 hip = [lms[23].x, lms[23].y]
                 knee = [lms[25].x, lms[25].y]
                 ankle = [lms[27].x, lms[27].y]
-                
-                angle = self.calculate_angle(hip, knee, ankle)
+                shoulder = [lms[11].x, lms[11].y]
 
-                # Логика Жамбас (присед)
+                # 1. ЛОГИКА ДЛЯ ЖАМБАС (Глубокий подсед)
                 if self.current_move == "Zhambas":
-                    if angle < 110: self.stage = "down"
-                    if angle > 160 and self.stage == "down":
+                    angle = self.calculate_angle(hip, knee, ankle)
+                    if angle < 100: self.stage = "down"
+                    if angle > 150 and self.stage == "down":
                         self.stage = "up"
                         with lock:
-                            shared.new_reps += 1
-                            shared.new_xp += 15
-                
-                # Рисуем скелет
-                mp.solutions.drawing_utils.draw_landmarks(img, results.pose_landmarks, mp.solutions.pose.POSE_CONNECTIONS)
+                            shared.count += 1
+                            shared.xp += 15
+                        self.hint = "ZHAMBAS DONE!"
+
+                # 2. ЛОГИКА ДЛЯ SHALU (Подножка - наклон + вынос ноги)
+                elif self.current_move == "Shalu":
+                    # Считаем угол наклона корпуса к бедру
+                    bend = self.calculate_angle(shoulder, hip, knee)
+                    if bend < 120: self.stage = "down"
+                    if bend > 160 and self.stage == "down":
+                        self.stage = "up"
+                        with lock:
+                            shared.count += 1
+                            shared.xp += 10
+                        self.hint = "SHALU DONE!"
+
+                # 3. ЛОГИКА ДЛЯ KOTERME (Бросок/Подъем - спина)
+                elif self.current_move == "Koterme":
+                    # Здесь важна высота плеч относительно бедер
+                    if shoulder[1] > hip[1] - 0.1: self.stage = "down"
+                    if shoulder[1] < hip[1] - 0.2 and self.stage == "down":
+                        self.stage = "up"
+                        with lock:
+                            shared.count += 1
+                            shared.xp += 20
+                        self.hint = "KOTERME LIFT!"
+
             except: pass
 
+        # Отрисовка текста на экране
+        cv2.putText(img, f"STAGE: {self.stage}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-# 4. ИНТЕРФЕЙС
+# 3. ИНТЕРФЕЙС
 def main():
-    st.markdown("<h1 class='main-title'>SHEBER</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #f5c842;'>🦅 SHEBER AI PRO</h1>", unsafe_allow_html=True)
 
-    # Обновляем статистику из буфера
-    with lock:
-        st.session_state.reps += shared.new_reps
-        st.session_state.xp += shared.new_xp
-        shared.new_reps = 0
-        shared.new_xp = 0
-
-    # Рейтинг
-    xp = st.session_state.xp
-    rank = "BALA" if xp < 100 else ("ZHASOSPIRIM" if xp < 500 else "BATYR")
-
-    # Верхняя панель статистики
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(f"<div class='stat-card'><div class='stat-label'>Rank</div><div class='stat-value'>{rank}</div></div>", unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"<div class='stat-card'><div class='stat-label'>Total XP</div><div class='stat-value'>{xp}</div></div>", unsafe_allow_html=True)
-    with col3:
-        st.markdown(f"<div class='stat-card'><div class='stat-label'>Reps Done</div><div class='stat-value'>{st.session_state.reps}</div></div>", unsafe_allow_html=True)
-
-    st.write("---")
-
-    # Рабочая зона
-    v_col, g_col = st.columns([2, 1])
-
-    with v_col:
-        st.subheader("Live Training")
-        ctx = webrtc_streamer(
-            key="sheber-main",
-            mode=WebRtcMode.SENDRECV,
-            video_processor_factory=SheberEngine,
-            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-            media_stream_constraints={"video": {"width": 640, "height": 480}, "audio": False},
-            async_processing=True
-        )
-
-    with g_col:
-        st.subheader("Settings")
-        move = st.selectbox("Current Drill", ["Zhambas", "Shalu", "Koterme"])
-        if ctx.video_processor:
-            ctx.video_processor.current_move = move
-        
-        st.info(f"Выполняй {move}, следи за осанкой. Система зачислит +15 XP за каждый четкий повтор.")
-        
-        if st.button("Reset Session"):
+    # Сайдбар
+    with st.sidebar:
+        move = st.selectbox("Select Drill", ["Zhambas", "Shalu", "Koterme"])
+        if st.button("Сбросить прогресс"):
             st.session_state.xp = 0
             st.session_state.reps = 0
             st.rerun()
+
+    # Обновление очков из ИИ в Streamlit
+    with lock:
+        st.session_state.reps += shared.count
+        st.session_state.xp += shared.xp
+        shared.count = 0 # Сбрасываем временный буфер
+        shared.xp = 0
+
+    # Расчет рейтинга
+    xp = st.session_state.xp
+    if xp < 100: rank = "BALA (Новичок)"
+    elif xp < 500: rank = "ZHASOSPIRIM (Юниор)"
+    else: rank = "BATYR (Мастер)"
+
+    # Метрики
+    c1, c2, c3 = st.columns(3)
+    c1.metric("RANK", rank)
+    c2.metric("XP", f"{xp} pts")
+    c3.metric("REPS", st.session_state.reps)
+
+    # Запуск видео
+    ctx = webrtc_streamer(
+        key="sheber-v2",
+        video_processor_factory=SheberAI,
+        rtc_configuration=RTC_CONFIG, # используй свой старый RTC_CONFIG
+        media_stream_constraints={"video": {"width": 480, "height": 360}, "audio": False},
+        async_processing=True
+    )
+
+    if ctx.video_processor:
+        ctx.video_processor.current_move = move
 
 if __name__ == "__main__":
     main()
