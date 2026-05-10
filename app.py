@@ -8,7 +8,7 @@ from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfigurati
 
 # 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
 st.set_page_config(
-    page_title="SHEBER AI PRO",
+    page_title="SHEBER",
     page_icon="🦅",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -61,8 +61,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 4. СЕТЬ
-RTC_CONFIG = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
-
+RTC_CONFIG = RTCConfiguration(
+    {"iceServers": [
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": ["stun:stun1.l.google.com:19302"]},
+        {"urls": ["stun:stun2.l.google.com:19302"]},
+        {"urls": ["stun:stun3.l.google.com:19302"]},
+        {"urls": ["stun:stun4.l.google.com:19302"]}
+    ]}
+)
 # 5. ДАННЫЕ СЕССИИ
 if "xp" not in st.session_state:
     st.session_state.update({"xp": 0, "reps": 0, "name": "Batyr", "move": "Zhambas"})
