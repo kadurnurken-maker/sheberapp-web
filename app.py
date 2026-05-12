@@ -1,6 +1,3 @@
-
-Copy
-
 import streamlit as st
 import mediapipe as mp
 import cv2
@@ -740,7 +737,6 @@ def main():
         SHEBER AI · КАЗАҚ КҮРЕСІ · 2025
     </div>
     """, unsafe_allow_html=True)
- 
  
 if __name__ == "__main__":
     main()
