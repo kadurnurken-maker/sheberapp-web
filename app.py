@@ -213,6 +213,21 @@ st.markdown("""
     text-transform: uppercase !important;
 }
 
+/* === ДОБАВЛЕННЫЙ КОД: ПРЯЧЕМ КНОПКУ ЗАКРЫТИЯ САЙДБАРА === */
+[data-testid="collapsedControl"], 
+[data-testid="stSidebarCollapseButton"] {
+    display: none !important;
+}
+
+/* Принудительно держим сайдбар открытым даже на узких экранах */
+@media (max-width: 992px) {
+    [data-testid="stSidebar"] {
+        display: block !important;
+        position: relative !important;
+        min-width: 300px !important;
+    }
+}
+
 /* Инпуты */
 [data-testid="stSidebar"] input,
 [data-testid="stSidebar"] select,
