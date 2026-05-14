@@ -6,6 +6,8 @@ import av
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration, WebRtcMode
 import threading
 import os
+import urllib.request
+import json
 
 # ─────────────────────────────────────────────
 # 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
@@ -34,7 +36,59 @@ mp_drawing = mp.solutions.drawing_utils
 mp_pose = mp.solutions.pose
 
 # ─────────────────────────────────────────────
-# 3. CSS + JS
+# 3. RTC КОНФИГУРАЦИЯ — STUN + TURN
+# ─────────────────────────────────────────────
+# Используем несколько STUN серверов + бесплатный TURN от Open Relay
+# Для продакшена рекомендуется зарегистрироваться на metered.ca
+def get_rtc_config():
+    """
+    Строим RTC конфиг с STUN и TURN серверами.
+    TURN нужен когда STUN не работает (корпоративные сети, мобильные операторы).
+    
+    Бесплатные TURN серверы от openrelay.metered.ca (лимит: 500MB/мес)
+    Для своего проекта зарегистрируйся: https://www.metered.ca/tools/openrelay/
+    """
+    return RTCConfiguration({
+        "iceServers": [
+            # ── STUN серверы (помогают при обычном NAT) ──
+            {"urls": ["stun:stun.l.google.com:19302"]},
+            {"urls": ["stun:stun1.l.google.com:19302"]},
+            {"urls": ["stun:stun.relay.metered.ca:80"]},
+
+            # ── TURN серверы (работают даже за строгим файрволом) ──
+            # Протокол UDP порт 80 — часто открыт
+            {
+                "urls": "turn:openrelay.metered.ca:80",
+                "username": "openrelayproject",
+                "credential": "openrelayproject"
+            },
+            # Протокол TCP порт 80 — обходит большинство файрволов
+            {
+                "urls": "turn:openrelay.metered.ca:80?transport=tcp",
+                "username": "openrelayproject",
+                "credential": "openrelayproject"
+            },
+            # Порт 443 — HTTPS порт, открыт везде
+            {
+                "urls": "turn:openrelay.metered.ca:443",
+                "username": "openrelayproject",
+                "credential": "openrelayproject"
+            },
+            # TURNS (TURN over TLS) — максимальная совместимость
+            {
+                "urls": "turns:openrelay.metered.ca:443?transport=tcp",
+                "username": "openrelayproject",
+                "credential": "openrelayproject"
+            },
+        ],
+        # Принудительно используем TURN если STUN не работает
+        "iceTransportPolicy": "all"  # можно поменять на "relay" если вообще ничего не работает
+    })
+
+RTC_CONFIG = get_rtc_config()
+
+# ─────────────────────────────────────────────
+# 4. CSS + JS
 # ─────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -169,7 +223,7 @@ section[data-testid="stSidebar"] > div > div > div > button,
 }
 .xp-caption { font-size: 0.65rem; color: #5a4a2a; margin-top: 4px; font-family: 'Rajdhani', sans-serif; letter-spacing: 2px; }
 
-.video-container { border: 1px solid rgba(240,192,64,0.25); border-radius: 12px; overflow: hidden; background: #040608; position: relative; }
+.video-container { border: 1px solid rgba(240,192,64,0.25); border-radius: 12px; overflow: hidden; background: #040608; }
 .video-header { background: rgba(240,192,64,0.07); border-bottom: 1px solid rgba(240,192,64,0.15); padding: 10px 16px; display: flex; align-items: center; gap: 10px; }
 .live-dot { width: 8px; height: 8px; background: #ff3333; border-radius: 50%; box-shadow: 0 0 6px #ff3333; animation: pulse 1.5s infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
@@ -210,20 +264,38 @@ section[data-testid="stSidebar"] > div > div > div > button,
 
 .divider { border: none; border-top: 1px solid rgba(240,192,64,0.1); margin: 20px 0; }
 
-/* Статус блок */
 .status-box {
-    padding: 10px 16px;
-    border-radius: 8px;
-    margin: 8px 0;
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 1rem;
-    font-weight: 600;
-    letter-spacing: 2px;
-    text-align: center;
+    padding: 10px 16px; border-radius: 8px; margin: 8px 0;
+    font-family: 'Rajdhani', sans-serif; font-size: 1rem;
+    font-weight: 600; letter-spacing: 2px; text-align: center;
 }
 .status-good { background: rgba(77,255,138,0.1); border: 1px solid rgba(77,255,138,0.3); color: #4dff8a; }
 .status-warn { background: rgba(255,107,77,0.1); border: 1px solid rgba(255,107,77,0.4); color: #ff6b4d; }
-.status-info { background: rgba(77,200,255,0.1); border: 1px solid rgba(77,200,255,0.3); color: #4dc8ff; }
+
+/* Блок предупреждения о соединении */
+.conn-warn {
+    background: rgba(255,160,0,0.08);
+    border: 1px solid rgba(255,160,0,0.3);
+    border-left: 3px solid #ffa000;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 12px 0;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 0.85rem;
+    color: #c8a040;
+    line-height: 1.6;
+}
+.conn-ok {
+    background: rgba(77,255,138,0.06);
+    border: 1px solid rgba(77,255,138,0.2);
+    border-left: 3px solid #4dff8a;
+    border-radius: 6px;
+    padding: 10px 16px;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 0.8rem;
+    color: #4a8a60;
+    letter-spacing: 1px;
+}
 </style>
 
 <script>
@@ -263,17 +335,6 @@ section[data-testid="stSidebar"] > div > div > div > button,
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# 4. КОНФИГУРАЦИЯ СЕТИ (WebRTC)
-# ─────────────────────────────────────────────
-RTC_CONFIG = RTCConfiguration({
-    "iceServers": [
-        {"urls": ["stun:stun.l.google.com:19302"]},
-        {"urls": ["stun:stun1.l.google.com:19302"]},
-        {"urls": ["stun:stun2.l.google.com:19302"]},
-    ]
-})
-
-# ─────────────────────────────────────────────
 # 5. СИСТЕМА РЕЙТИНГА
 # ─────────────────────────────────────────────
 RANKS = [
@@ -298,9 +359,7 @@ def get_rank_progress(xp):
 # ─────────────────────────────────────────────
 # 6. ДАННЫЕ СЕССИИ
 # ─────────────────────────────────────────────
-defaults = {
-    "xp": 0, "reps": 0, "name": "Batyr", "move": "Zhambas",
-}
+defaults = {"xp": 0, "reps": 0, "name": "Batyr", "move": "Zhambas"}
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -311,7 +370,7 @@ for k, v in defaults.items():
 _global_reps   = 0
 _global_xp     = 0
 _global_hint   = "READY"
-_global_status = "OK"   # OK | WARN_POSTURE | WARN_BALANCE
+_global_status = "OK"
 _lock = threading.Lock()
 
 def increment_rep():
@@ -346,14 +405,10 @@ class SheberAI(VideoProcessorBase):
     def __init__(self):
         self.pose  = pose_model
         self.stage = None
-        self.hint  = "READY"
-        self.hint_color = (200, 200, 200)
         self.current_name = "Batyr"
         self.current_move = "Zhambas"
         self._local_reps = 0
         self._local_xp   = 0
-        # Для Шалу — трекинг переноса веса
-        self._shalu_balance_side = None
 
     def calculate_angle(self, a, b, c):
         a, b, c = np.array(a), np.array(b), np.array(c)
@@ -366,29 +421,19 @@ class SheberAI(VideoProcessorBase):
         lm = lms[idx.value]
         return [lm.x, lm.y]
 
-    # ── ПРОВЕРКА ОСАНКИ ──────────────────────────
     def check_posture(self, lms):
-        """Возвращает (прямая_спина: bool, отклонение_плеч: float)"""
         l_shoulder = self.get_lm(lms, mp_pose.PoseLandmark.LEFT_SHOULDER)
         r_shoulder = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_SHOULDER)
         l_hip      = self.get_lm(lms, mp_pose.PoseLandmark.LEFT_HIP)
         r_hip      = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_HIP)
-
-        # Наклон плеч (разница по Y)
         shoulder_tilt = abs(l_shoulder[1] - r_shoulder[1])
-        # Наклон позвоночника (середина плеч vs середина бёдер)
-        mid_shoulder = [(l_shoulder[0]+r_shoulder[0])/2, (l_shoulder[1]+r_shoulder[1])/2]
-        mid_hip      = [(l_hip[0]+r_hip[0])/2,           (l_hip[1]+r_hip[1])/2]
-        spine_lean   = abs(mid_shoulder[0] - mid_hip[0])
-
-        # Порог: если наклон > 0.07 единиц — спина кривая
-        straight = shoulder_tilt < 0.07 and spine_lean < 0.10
+        mid_shoulder  = [(l_shoulder[0]+r_shoulder[0])/2, (l_shoulder[1]+r_shoulder[1])/2]
+        mid_hip       = [(l_hip[0]+r_hip[0])/2,           (l_hip[1]+r_hip[1])/2]
+        spine_lean    = abs(mid_shoulder[0] - mid_hip[0])
+        straight      = shoulder_tilt < 0.07 and spine_lean < 0.10
         return straight, shoulder_tilt
 
-    # ══════════════════════════════════════════════
-    # ЖАМБАС — подсед и бросок через бедро
-    # Логика: угол колена (подсед < 120°, выход > 160°)
-    # ══════════════════════════════════════════════
+    # ── ЖАМБАС ──────────────────────────────────
     def analyze_zhambas(self, lms):
         l_hip   = self.get_lm(lms, mp_pose.PoseLandmark.LEFT_HIP)
         l_knee  = self.get_lm(lms, mp_pose.PoseLandmark.LEFT_KNEE)
@@ -396,46 +441,27 @@ class SheberAI(VideoProcessorBase):
         r_hip   = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_HIP)
         r_knee  = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_KNEE)
         r_ankle = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_ANKLE)
-
-        l_angle = self.calculate_angle(l_hip, l_knee, l_ankle)
-        r_angle = self.calculate_angle(r_hip, r_knee, r_ankle)
-        knee_angle = min(l_angle, r_angle)
-
-        # Проверка осанки
+        knee_angle = min(
+            self.calculate_angle(l_hip, l_knee, l_ankle),
+            self.calculate_angle(r_hip, r_knee, r_ankle)
+        )
         posture_ok, _ = self.check_posture(lms)
-
-        hint = ""
-        hint_color = (200, 200, 200)
-        rep_counted = False
-
         if not posture_ok:
-            hint = "KEEP BACK STRAIGHT!"
-            hint_color = (60, 60, 255)   # КРАСНЫЙ — ошибка осанки
             set_global_hint("⚠️ BACK STRAIGHT!", "WARN_POSTURE")
-        elif knee_angle < 120:
+            return knee_angle, "KEEP BACK STRAIGHT!", (0, 50, 220)
+        if knee_angle < 120:
             self.stage = "down"
-            hint = "GOOD SQUAT - DRIVE!"
-            hint_color = (64, 180, 255)
             set_global_hint("GOOD SQUAT!", "OK")
-        elif knee_angle > 160 and self.stage == "down":
+            return knee_angle, "GOOD SQUAT - DRIVE!", (64, 180, 255)
+        if knee_angle > 160 and self.stage == "down":
             self.stage = "up"
             increment_rep()
             self._local_reps, self._local_xp, _, _ = get_global_stats()
-            hint = "PERFECT THROW!"
-            hint_color = (64, 255, 100)
-            rep_counted = True
             set_global_hint("✅ PERFECT!", "OK")
-        else:
-            hint = f"ANGLE: {int(knee_angle)}"
-            hint_color = (180, 180, 100)
+            return knee_angle, "PERFECT THROW!", (64, 255, 100)
+        return knee_angle, f"ANGLE: {int(knee_angle)}", (180, 180, 100)
 
-        return knee_angle, hint, hint_color
-
-    # ══════════════════════════════════════════════
-    # ШАЛУ — подсечка
-    # Логика: перенос веса на одну ногу (одно колено сгибается,
-    # другое почти прямое) + быстрое движение бедра в сторону
-    # ══════════════════════════════════════════════
+    # ── ШАЛУ ────────────────────────────────────
     def analyze_shalu(self, lms):
         l_hip   = self.get_lm(lms, mp_pose.PoseLandmark.LEFT_HIP)
         l_knee  = self.get_lm(lms, mp_pose.PoseLandmark.LEFT_KNEE)
@@ -443,126 +469,78 @@ class SheberAI(VideoProcessorBase):
         r_hip   = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_HIP)
         r_knee  = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_KNEE)
         r_ankle = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_ANKLE)
-
-        l_angle = self.calculate_angle(l_hip, l_knee, l_ankle)
-        r_angle = self.calculate_angle(r_hip, r_knee, r_ankle)
-
-        # Разница углов — один согнут (опорная нога), другой выпрямлен (атакующая)
+        l_angle    = self.calculate_angle(l_hip, l_knee, l_ankle)
+        r_angle    = self.calculate_angle(r_hip, r_knee, r_ankle)
         angle_diff = abs(l_angle - r_angle)
-
         posture_ok, _ = self.check_posture(lms)
-
-        hint = ""
-        hint_color = (200, 200, 200)
-
         if not posture_ok:
-            hint = "LEAN INTO SWEEP!"
-            hint_color = (60, 60, 255)
             set_global_hint("⚠️ LEAN FORWARD!", "WARN_POSTURE")
-        elif angle_diff > 40 and self.stage != "sweep":
-            # Одна нога сильно согнута — перенос веса
+            return min(l_angle, r_angle), "LEAN INTO SWEEP!", (0, 50, 220)
+        if angle_diff > 40 and self.stage != "sweep":
             self.stage = "sweep"
-            hint = "SWEEP NOW!"
-            hint_color = (64, 180, 255)
             set_global_hint("SWEEP!", "OK")
-        elif angle_diff < 15 and self.stage == "sweep":
-            # Вернулся в стойку — засчитываем
+            return min(l_angle, r_angle), "SWEEP NOW!", (64, 180, 255)
+        if angle_diff < 15 and self.stage == "sweep":
             self.stage = None
             increment_rep()
             self._local_reps, self._local_xp, _, _ = get_global_stats()
-            hint = "NICE SWEEP!"
-            hint_color = (64, 255, 100)
             set_global_hint("✅ NICE SWEEP!", "OK")
-        else:
-            hint = f"DIFF: {int(angle_diff)}°"
-            hint_color = (180, 180, 100)
+            return min(l_angle, r_angle), "NICE SWEEP!", (64, 255, 100)
+        return min(l_angle, r_angle), f"DIFF: {int(angle_diff)}", (180, 180, 100)
 
-        # Показываем min угол для HUD
-        return min(l_angle, r_angle), hint, hint_color
-
-    # ══════════════════════════════════════════════
-    # КӨТЕРМЕ — подъёмный бросок
-    # Логика: приседание (угол колена < 100°) + ПОДЪЁМ (разгибание ног)
-    # + наклон торса вперёд в фазе подъёма
-    # Отличие от Жамбаса: нужен более глубокий присед (< 100° vs 120°)
-    # и контроль наклона корпуса вперёд при подъёме
-    # ══════════════════════════════════════════════
+    # ── КӨТЕРМЕ ─────────────────────────────────
     def analyze_koterme(self, lms):
-        l_hip      = self.get_lm(lms, mp_pose.PoseLandmark.LEFT_HIP)
-        l_knee     = self.get_lm(lms, mp_pose.PoseLandmark.LEFT_KNEE)
-        l_ankle    = self.get_lm(lms, mp_pose.PoseLandmark.LEFT_ANKLE)
-        r_hip      = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_HIP)
-        r_knee     = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_KNEE)
-        r_ankle    = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_ANKLE)
-        l_shoulder = self.get_lm(lms, mp_pose.PoseLandmark.LEFT_SHOULDER)
-        r_shoulder = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_SHOULDER)
-
-        l_angle = self.calculate_angle(l_hip, l_knee, l_ankle)
-        r_angle = self.calculate_angle(r_hip, r_knee, r_ankle)
-        knee_angle = min(l_angle, r_angle)
-
-        # Наклон корпуса вперёд: плечи должны быть перед бёдрами
-        mid_shoulder_x = (l_shoulder[0] + r_shoulder[0]) / 2
-        mid_hip_x      = (l_hip[0] + r_hip[0]) / 2
-        torso_forward  = mid_shoulder_x - mid_hip_x  # < 0 = наклон вперёд (зеркало)
-
+        l_hip   = self.get_lm(lms, mp_pose.PoseLandmark.LEFT_HIP)
+        l_knee  = self.get_lm(lms, mp_pose.PoseLandmark.LEFT_KNEE)
+        l_ankle = self.get_lm(lms, mp_pose.PoseLandmark.LEFT_ANKLE)
+        r_hip   = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_HIP)
+        r_knee  = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_KNEE)
+        r_ankle = self.get_lm(lms, mp_pose.PoseLandmark.RIGHT_ANKLE)
+        knee_angle = min(
+            self.calculate_angle(l_hip, l_knee, l_ankle),
+            self.calculate_angle(r_hip, r_knee, r_ankle)
+        )
         posture_ok, _ = self.check_posture(lms)
-
-        hint = ""
-        hint_color = (200, 200, 200)
-
-        if not posture_ok and self.stage != "lift":
-            hint = "GRIP & BEND DEEP!"
-            hint_color = (60, 60, 255)
-            set_global_hint("⚠️ BEND DEEPER!", "WARN_POSTURE")
-        elif knee_angle < 100:
-            # Глубокий присед — фаза захвата
+        # Фаза 1: глубокий присед < 100° (глубже чем Жамбас!)
+        if knee_angle < 100:
             self.stage = "squat"
-            hint = "DEEP SQUAT - GOOD!"
-            hint_color = (64, 180, 255)
             set_global_hint("DEEP SQUAT!", "OK")
-        elif knee_angle > 155 and self.stage == "squat":
-            # Фаза подъёма — разгибаем ноги
-            self.stage = "lift"
-            hint = "LIFT & THROW!"
-            hint_color = (255, 180, 0)
+            return knee_angle, "DEEP SQUAT - GOOD!", (64, 180, 255)
+        # Фаза 2: начало подъёма
+        if knee_angle > 130 and knee_angle < 160 and self.stage == "squat":
+            self.stage = "lifting"
             set_global_hint("LIFT!", "OK")
-        elif knee_angle > 170 and self.stage == "lift":
-            # Полное выпрямление — бросок завершён
+            return knee_angle, "LIFT & THROW!", (255, 180, 0)
+        # Фаза 3: полное выпрямление — бросок
+        if knee_angle > 165 and self.stage == "lifting":
             self.stage = None
             increment_rep()
             self._local_reps, self._local_xp, _, _ = get_global_stats()
-            hint = "POWERFUL LIFT!"
-            hint_color = (64, 255, 100)
             set_global_hint("✅ POWERFUL LIFT!", "OK")
-        else:
-            hint = f"KNEE: {int(knee_angle)}"
-            hint_color = (180, 180, 100)
+            return knee_angle, "POWERFUL LIFT!", (64, 255, 100)
+        # Предупреждение если пытается схитрить без глубокого приседа
+        if not posture_ok:
+            set_global_hint("⚠️ BEND DEEPER!", "WARN_POSTURE")
+            return knee_angle, "GRIP & BEND DEEP!", (0, 50, 220)
+        return knee_angle, f"KNEE: {int(knee_angle)}", (180, 180, 100)
 
-        return knee_angle, hint, hint_color
-
-    # ─────────────────────────────────────────────
-    # ГЛАВНЫЙ ОБРАБОТЧИК КАДРА
-    # ─────────────────────────────────────────────
+    # ── ГЛАВНЫЙ ОБРАБОТЧИК ──────────────────────
     def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
         img = cv2.flip(img, 1)
         h, w = img.shape[:2]
-
         rgb     = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         results = self.pose.process(rgb)
 
         angle_val  = None
-        hint_text  = "NO POSE DETECTED"
+        hint_text  = "STAND IN FRAME"
         hint_color = (100, 100, 100)
         posture_ok = True
 
         if results.pose_landmarks:
             lms = results.pose_landmarks.landmark
-
-            # Цвет скелета зависит от состояния
             posture_ok, _ = self.check_posture(lms)
-            skeleton_color = (64, 255, 100) if posture_ok else (60, 60, 255)
+            skeleton_color = (64, 255, 100) if posture_ok else (0, 50, 220)
 
             mp_drawing.draw_landmarks(
                 img, results.pose_landmarks, mp_pose.POSE_CONNECTIONS,
@@ -570,27 +548,26 @@ class SheberAI(VideoProcessorBase):
                 mp_drawing.DrawingSpec(color=(255, 255, 255), thickness=1, circle_radius=1)
             )
 
-            move = self.current_move
             try:
+                move = self.current_move
                 if move == "Zhambas":
                     angle_val, hint_text, hint_color = self.analyze_zhambas(lms)
                 elif move == "Shalu":
                     angle_val, hint_text, hint_color = self.analyze_shalu(lms)
                 elif move == "Koterme":
                     angle_val, hint_text, hint_color = self.analyze_koterme(lms)
-            except Exception as e:
+            except Exception:
                 hint_text  = "POSITIONING..."
                 hint_color = (100, 100, 100)
 
-        # ── КРАСНЫЙ ОВЕРЛЕЙ при ошибке осанки ────────
+        # Красный оверлей при ошибке осанки
         if not posture_ok and results.pose_landmarks:
             red_overlay = img.copy()
             cv2.rectangle(red_overlay, (0, 0), (w, h), (0, 0, 180), -1)
             img = cv2.addWeighted(red_overlay, 0.08, img, 0.92, 0)
-            # Красная рамка по краям
             cv2.rectangle(img, (0, 0), (w-1, h-1), (0, 0, 255), 3)
 
-        # ── HUD ──────────────────────────────────────
+        # HUD
         overlay = img.copy()
         cv2.rectangle(overlay, (0, 0),      (w, 64),    (5, 8, 14), -1)
         cv2.line(overlay,      (0, 64),     (w, 64),    (80, 60, 20), 1)
@@ -611,16 +588,13 @@ class SheberAI(VideoProcessorBase):
             cv2.putText(img, f"{int(angle_val)}°",
                         (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (150, 130, 80), 2, cv2.LINE_AA)
 
-        # Хинт — большой и по центру снизу
-        hint_x = w // 2 - len(hint_text) * 8
+        hint_x = max(10, w // 2 - len(hint_text) * 8)
         cv2.putText(img, hint_text,
-                    (max(10, hint_x), h - 18), cv2.FONT_HERSHEY_DUPLEX, 0.85, hint_color, 2, cv2.LINE_AA)
+                    (hint_x, h - 18), cv2.FONT_HERSHEY_DUPLEX, 0.85, hint_color, 2, cv2.LINE_AA)
 
-        # Стадия справа снизу
-        cv2.putText(img, (self.stage or "---").upper(),
-                    (w - 120, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (100, 90, 50), 1, cv2.LINE_AA)
+        cv2.putText(img, (self.stage or "READY").upper(),
+                    (w - 130, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 90, 50), 1, cv2.LINE_AA)
 
-        # Иконка предупреждения при кривой спине
         if not posture_ok and results.pose_landmarks:
             cv2.putText(img, "! BAD POSTURE",
                         (16, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 60, 255), 1, cv2.LINE_AA)
@@ -633,7 +607,6 @@ class SheberAI(VideoProcessorBase):
 # ─────────────────────────────────────────────
 def main():
 
-    # ── САЙДБАР ──────────────────────────────────
     with st.sidebar:
         st.markdown("### 🦅 WARRIOR PROFILE")
 
@@ -671,8 +644,8 @@ def main():
         <div class="xp-track"><div class="xp-fill" style="width:{prog}%"></div></div>
         """, unsafe_allow_html=True)
 
-        # Живой статус из AI
         st.markdown('<hr class="divider">', unsafe_allow_html=True)
+
         status_class = "status-warn" if "WARN" in g_status else "status-good"
         st.markdown(f'<div class="status-box {status_class}">{g_hint}</div>', unsafe_allow_html=True)
 
@@ -726,6 +699,25 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
+    # ── ПРЕДУПРЕЖДЕНИЕ О СОЕДИНЕНИИ ──────────────
+    with st.expander("⚠️ Проблемы с подключением камеры? Читай здесь", expanded=False):
+        st.markdown("""
+        <div class="conn-warn">
+        <b>Почему появляется ошибка соединения?</b><br>
+        WebRTC (технология видео) требует прямого соединения между твоим браузером и сервером.
+        Файрволы, VPN, корпоративные сети и мобильные операторы часто это блокируют.<br><br>
+        <b>Решения (по порядку):</b><br>
+        1. Отключи VPN если включён<br>
+        2. Попробуй другую сеть (мобильный хотспот вместо WiFi)<br>
+        3. Используй Chrome или Edge (Firefox иногда глючит с WebRTC)<br>
+        4. Разреши доступ к камере в браузере (иконка замка в адресной строке)<br>
+        5. Если на Streamlit Cloud — лучше запустить локально: <code>streamlit run app.py</code><br>
+        </div>
+        <div class="conn-ok">
+        ✅ В коде уже добавлены TURN серверы (openrelay.metered.ca) — они работают даже за строгими файрволами через порт 443 (HTTPS).
+        </div>
+        """, unsafe_allow_html=True)
+
     # ── ВИДЕО + ГАЙД ─────────────────────────────
     col_vid, col_guide = st.columns([2, 1])
 
@@ -771,21 +763,21 @@ def main():
         guides = {
             "Zhambas": {
                 "title": "ЖАМБАС", "desc": "Бедренный бросок",
-                "tip": "Держи спину ровно при подседе. Взрыв идёт от бёдер — корпус должен войти под противника. AI считает повтор: угол колена < 120° (подсед) → выпрямление > 160°.",
-                "steps": ["Захват пояса", "Подсед — угол 90–120°", "Подъём через бедро", "Бросок вперёд"],
+                "tip": "Держи спину ровно. AI считает: угол колена < 120° (подсед) → выпрямление > 160° (бросок).",
+                "steps": ["Захват пояса", "Подсед 90–120°", "Подъём через бедро", "Бросок вперёд"],
                 "detect": "📐 Угол колена + осанка"
             },
             "Shalu": {
                 "title": "ШАЛУ", "desc": "Подсечка",
-                "tip": "Перенеси вес на опорную ногу и зайди сбоку. AI считает повтор: разница углов ног > 40° (перенос веса) → возврат в стойку.",
-                "steps": ["Тяни на себя", "Зайди сбоку", "Перенос веса", "Подсечка и возврат"],
+                "tip": "Перенеси вес на одну ногу. AI считает разницу углов ног: > 40° (перенос) → возврат в стойку.",
+                "steps": ["Тяни противника", "Зайди сбоку", "Перенос веса", "Подсечка — возврат"],
                 "detect": "⚖️ Разница углов ног (баланс)"
             },
             "Koterme": {
                 "title": "КӨТЕРМЕ", "desc": "Подъёмный бросок",
-                "tip": "Глубокий захват и присед ниже 100°. AI считает 3 фазы: глубокий присед → подъём → полное выпрямление (бросок). Сложнее Жамбаса!",
-                "steps": ["Глубокий захват пояса", "Присед ниже 100°", "Взрывной подъём", "Полное выпрямление — бросок"],
-                "detect": "🏋️ 3 фазы: присед < 100° → подъём → 170°+"
+                "tip": "Глубже чем Жамбас! AI считает 3 фазы: присед < 100° → подъём → полное выпрямление > 165°.",
+                "steps": ["Глубокий захват пояса", "Присед ниже 100°", "Взрывной подъём", "Полное выпрямление"],
+                "detect": "🏋️ 3 фазы: < 100° → подъём → 165°+"
             }
         }
 
@@ -804,19 +796,17 @@ def main():
         for i, step in enumerate(g["steps"], 1):
             st.markdown(f"`{i}.` {step}")
 
-        # Легенда цветов
         st.markdown("""
         <div style="margin-top:16px;padding:12px;background:rgba(0,0,0,0.3);
                     border-radius:8px;font-family:'Rajdhani',sans-serif;font-size:0.8rem;letter-spacing:1px;">
-            <div style="color:#7a6a4a;font-size:0.7rem;letter-spacing:3px;margin-bottom:8px;">AI FEEDBACK LEGEND</div>
-            <div>🟢 <span style="color:#4dff8a">Зелёный</span> — правильно, повтор засчитан</div>
+            <div style="color:#7a6a4a;font-size:0.7rem;letter-spacing:3px;margin-bottom:8px;">AI FEEDBACK</div>
+            <div>🟢 <span style="color:#4dff8a">Зелёный</span> — повтор засчитан</div>
             <div>🔵 <span style="color:#4dc8ff">Синий</span> — фаза выполнения</div>
-            <div>🔴 <span style="color:#ff4040">Красный</span> — ошибка осанки / спина не ровная</div>
+            <div>🔴 <span style="color:#ff4040">Красный</span> — ошибка / плохая осанка</div>
             <div>🟡 <span style="color:#f0c040">Жёлтый</span> — промежуточная фаза</div>
         </div>
         """, unsafe_allow_html=True)
 
-    # ── FOOTER ───────────────────────────────────
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
     if os.path.exists("hero.jpg"):
         st.image("hero.jpg", use_container_width=True)
