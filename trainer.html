@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SHEBER AI — Kazakh Kuresi Coach</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<!-- MediaPipe CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+<style>
+:root {
+  --bg:      #080b10;
+  --bg2:     #0d1117;
+  --card:    #111620;
+  --border:  rgba(240,192,64,0.15);
+  --gold:    #f0c040;
+  --gold2:   #b8860b;
+  --text:    #e8dcc8;
+  --muted:   rgba(232,220,200,0.45);
+  --green:   #4dff8a;
+  --blue:    #4dc8ff;
+  --red:     #ff4040;
+  --orange:  #ff9a00;
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Rajdhani', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── NAV ── */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 28px;
+  background: rgba(8,11,16,0.92);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 100;
+}
+.logo {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 26px; letter-spacing: 4px;
+  color: var(--gold);
+  text-shadow: 0 0 30px rgba(240,192,64,0.3);
+}
+.logo span { color: rgba(232,220,200,0.4); font-size: 13px; letter-spacing: 2px; margin-left: 8px; font-family: 'Rajdhani', sans-serif; }
+.nav-links { display: flex; gap: 24px; }
+.nav-links a {
+  color: var(--muted); font-size: 13px; font-weight: 600;
+  letter-spacing: 2px; text-transform: uppercase;
+  text-decoration: none; transition: color 0.2s;
+}
+.nav-links a:hover { color: var(--gold); }
+
+/* ── LAYOUT ── */
+.app-grid {
+  display: grid;
+  grid-template-columns: 300px 1fr 260px;
+  gap: 0;
+  min-height: calc(100vh - 57px);
+}
+
+/* ── SIDEBAR LEFT ── */
+.sidebar {
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  padding: 24px 20px;
+  display: flex; flex-direction: column; gap: 20px;
+}
+.sidebar-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 18px; letter-spacing: 4px; color: var(--gold);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+
+/* Rank badge */
+.rank-block {
+  background: rgba(240,192,64,0.05);
+  border: 1px solid var(--border);
+  border-radius: 12px; padding: 20px;
+  text-align: center;
+}
+.rank-icon { font-size: 42px; line-height: 1; margin-bottom: 6px; }
+.rank-name {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 22px; letter-spacing: 4px; color: var(--gold);
+}
+.rank-desc { font-size: 12px; color: var(--muted); letter-spacing: 2px; margin-top: 2px; }
+.xp-bar-wrap { margin-top: 14px; }
+.xp-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); letter-spacing: 1px; margin-bottom: 6px; }
+.xp-track { background: rgba(255,255,255,0.06); border-radius: 4px; height: 6px; overflow: hidden; }
+.xp-fill {
+  height: 100%; border-radius: 4px;
+  background: linear-gradient(90deg, var(--gold2), var(--gold), #ffd700);
+  box-shadow: 0 0 10px rgba(240,192,64,0.4);
+  transition: width 0.6s ease;
+}
+
+/* Metrics */
+.metric-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.metric {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 12px;
+  text-align: center;
+}
+.metric-val {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 32px; line-height: 1; color: var(--gold);
+}
+.metric-val.blue  { color: var(--blue); }
+.metric-val.green { color: var(--green); }
+.metric-lbl { font-size: 10px; color: var(--muted); letter-spacing: 2px; margin-top: 4px; }
+
+/* Status box */
+.status-box {
+  border-radius: 8px; padding: 12px 14px;
+  font-size: 14px; font-weight: 700; letter-spacing: 2px;
+  text-align: center; min-height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.3s;
+}
+.status-ready  { background: rgba(232,220,200,0.05); border: 1px solid rgba(232,220,200,0.1); color: var(--muted); }
+.status-good   { background: rgba(77,255,138,0.10); border: 1px solid rgba(77,255,138,0.3); color: var(--green); }
+.status-active { background: rgba(77,200,255,0.10); border: 1px solid rgba(77,200,255,0.3); color: var(--blue); }
+.status-warn   { background: rgba(255,64,64,0.10);  border: 1px solid rgba(255,64,64,0.4);  color: var(--red); }
+
+/* Drill selector */
+.drill-selector { display: flex; flex-direction: column; gap: 8px; }
+.drill-btn {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 14px;
+  display: flex; align-items: center; gap: 10px;
+  cursor: pointer; transition: all 0.2s; color: var(--muted);
+  font-family: 'Rajdhani', sans-serif; font-size: 14px; font-weight: 700;
+  letter-spacing: 1.5px; text-transform: uppercase;
+}
+.drill-btn:hover { border-color: rgba(240,192,64,0.4); color: var(--text); }
+.drill-btn.active { border-color: var(--gold); color: var(--gold); background: rgba(240,192,64,0.07); }
+.drill-icon { font-size: 20px; }
+.drill-sub { font-size: 10px; color: var(--muted); letter-spacing: 1px; margin-top: 1px; font-weight: 400; }
+
+/* Reset btn */
+.reset-btn {
+  background: rgba(240,192,64,0.08);
+  border: 1px solid rgba(240,192,64,0.2);
+  color: var(--gold);
+  border-radius: 8px; padding: 12px;
+  font-family: 'Bebas Neue', sans-serif; font-size: 16px; letter-spacing: 3px;
+  cursor: pointer; transition: all 0.2s; width: 100%;
+}
+.reset-btn:hover { background: rgba(240,192,64,0.15); border-color: var(--gold); }
+
+/* ── MAIN VIDEO AREA ── */
+.main-area {
+  display: flex; flex-direction: column;
+  background: #040608;
+  position: relative;
+}
+
+.video-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  background: rgba(240,192,64,0.05);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.live-dot {
+  width: 8px; height: 8px; background: var(--red);
+  border-radius: 50%; box-shadow: 0 0 6px var(--red);
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.video-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 3px;
+  color: var(--muted); text-transform: uppercase;
+}
+
+.video-wrap {
+  position: relative; flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 0;
+}
+#video { display: none; }
+#canvas {
+  width: 100%; height: 100%;
+  max-height: calc(100vh - 200px);
+  object-fit: contain;
+  display: block;
+}
+
+.camera-placeholder {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px;
+  color: var(--muted);
+}
+.cam-icon { font-size: 64px; opacity: 0.2; }
+.cam-text { font-size: 13px; letter-spacing: 3px; text-transform: uppercase; opacity: 0.5; }
+
+.start-btn {
+  background: linear-gradient(135deg, var(--gold2), var(--gold));
+  color: #080b10; border: none; border-radius: 10px;
+  padding: 16px 40px;
+  font-family: 'Bebas Neue', sans-serif; font-size: 20px; letter-spacing: 4px;
+  cursor: pointer; transition: all 0.2s;
+  box-shadow: 0 4px 24px rgba(240,192,64,0.3);
+}
+.start-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(240,192,64,0.4); }
+
+/* ── RIGHT PANEL ── */
+.guide-panel {
+  background: var(--bg2);
+  border-left: 1px solid var(--border);
+  padding: 24px 18px;
+  display: flex; flex-direction: column; gap: 16px;
+  overflow-y: auto;
+}
+.guide-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 22px; letter-spacing: 3px; color: var(--gold);
+}
+.guide-sub { font-size: 11px; color: var(--muted); letter-spacing: 2px; margin-top: -10px; }
+
+.guide-img {
+  width: 100%; border-radius: 10px;
+  background: var(--card); border: 1px solid var(--border);
+  aspect-ratio: 4/3; object-fit: cover;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 11px; letter-spacing: 2px;
+  overflow: hidden;
+}
+.guide-img img { width: 100%; height: 100%; object-fit: cover; }
+
+.guide-tip {
+  background: rgba(240,192,64,0.05);
+  border-left: 2px solid var(--gold2);
+  border-radius: 0 8px 8px 0;
+  padding: 12px 14px; font-size: 13px; line-height: 1.7;
+  color: rgba(232,220,200,0.7);
+}
+
+.steps-list { display: flex; flex-direction: column; gap: 8px; }
+.step-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  font-size: 13px; color: var(--text);
+}
+.step-num {
+  font-family: 'Space Mono', monospace; font-size: 10px;
+  color: var(--gold); min-width: 22px;
+  background: rgba(240,192,64,0.1); border-radius: 4px;
+  padding: 2px 6px; margin-top: 1px;
+}
+
+.detect-badge {
+  background: rgba(77,200,255,0.08); border: 1px solid rgba(77,200,255,0.2);
+  border-radius: 6px; padding: 8px 12px;
+  font-size: 11px; color: var(--blue); letter-spacing: 1.5px;
+}
+
+.legend { display: flex; flex-direction: column; gap: 6px; }
+.legend-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── WARNING BANNER ── */
+.warn-banner {
+  background: rgba(255,154,0,0.08);
+  border: 1px solid rgba(255,154,0,0.25);
+  border-radius: 8px; padding: 12px 16px;
+  font-size: 12px; color: rgba(255,154,0,0.8);
+  letter-spacing: 0.5px; line-height: 1.6;
+  display: none;
+}
+.warn-banner.show { display: block; }
+
+/* ── NAME INPUT ── */
+.name-input {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 14px;
+  color: var(--text); font-family: 'Rajdhani', sans-serif;
+  font-size: 15px; letter-spacing: 1px; width: 100%;
+  outline: none; transition: border-color 0.2s;
+}
+.name-input:focus { border-color: rgba(240,192,64,0.5); }
+.input-label { font-size: 10px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 6px; }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 900px) {
+  .app-grid { grid-template-columns: 1fr; }
+  .sidebar, .guide-panel { display: none; }
+  .mobile-bar {
+    display: flex !important;
+    flex-wrap: wrap; gap: 8px; padding: 10px 12px;
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+  }
+}
+.mobile-bar { display: none; }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="topbar">
+  <div class="logo">🦅 SHEBER<span>AI</span></div>
+  <div class="nav-links">
+    <a href="index.html">Home</a>
+    <a href="process.html">Development</a>
+  </div>
+</nav>
+
+<div class="app-grid">
+
+  <!-- ══ LEFT SIDEBAR ══ -->
+  <aside class="sidebar">
+    <div class="sidebar-title">🦅 Warrior Profile</div>
+
+    <div>
+      <div class="input-label">Warrior Name</div>
+      <input class="name-input" id="warriorName" type="text" value="Batyr" maxlength="20">
+    </div>
+
+    <!-- Rank -->
+    <div class="rank-block">
+      <div class="rank-icon" id="rankIcon">🥋</div>
+      <div class="rank-name" id="rankName">BALA</div>
+      <div class="rank-desc" id="rankDesc">Жас жауынгер</div>
+      <div class="xp-bar-wrap">
+        <div class="xp-label">
+          <span id="xpCurrent">0 XP</span>
+          <span id="xpNext">150 XP</span>
+        </div>
+        <div class="xp-track"><div class="xp-fill" id="xpFill" style="width:0%"></div></div>
+      </div>
+    </div>
+
+    <!-- Metrics -->
+    <div class="metric-row">
+      <div class="metric">
+        <div class="metric-val blue" id="repCount">0</div>
+        <div class="metric-lbl">Reps</div>
+      </div>
+      <div class="metric">
+        <div class="metric-val" id="xpCount">0</div>
+        <div class="metric-lbl">XP</div>
+      </div>
+    </div>
+
+    <!-- Status -->
+    <div class="status-box status-ready" id="statusBox">READY</div>
+
+    <div style="border-top:1px solid var(--border);padding-top:16px;">
+      <div class="input-label" style="margin-bottom:10px;">Select Drill</div>
+      <div class="drill-selector">
+        <div class="drill-btn active" data-drill="Zhambas" onclick="selectDrill('Zhambas',this)">
+          <span class="drill-icon">🤸</span>
+          <div>
+            <div>Zhambas</div>
+            <div class="drill-sub">Бедренный бросок</div>
+          </div>
+        </div>
+        <div class="drill-btn" data-drill="Shalu" onclick="selectDrill('Shalu',this)">
+          <span class="drill-icon">⚡</span>
+          <div>
+            <div>Shalu</div>
+            <div class="drill-sub">Подсечка</div>
+          </div>
+        </div>
+        <div class="drill-btn" data-drill="Koterme" onclick="selectDrill('Koterme',this)">
+          <span class="drill-icon">🏋️</span>
+          <div>
+            <div>Köterme</div>
+            <div class="drill-sub">Подъёмный бросок</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button class="reset-btn" onclick="resetSession()">⟳ RESET SESSION</button>
+  </aside>
+
+  <!-- ══ MAIN VIDEO ══ -->
+  <main class="main-area">
+    <div class="video-header">
+      <div class="live-dot"></div>
+      <span class="video-label">Live · MediaPipe Pose · In-Browser AI</span>
+    </div>
+
+    <div class="video-wrap">
+      <video id="video" playsinline autoplay muted></video>
+      <canvas id="canvas"></canvas>
+
+      <div class="camera-placeholder" id="placeholder">
+        <div class="cam-icon">📷</div>
+        <div class="cam-text">Camera not started</div>
+        <button class="start-btn" onclick="startCamera()">START TRAINING</button>
+        <div class="warn-banner" id="warnBanner">
+          Camera permission required. Click the lock icon in the address bar and allow camera access.
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ══ RIGHT GUIDE PANEL ══ -->
+  <aside class="guide-panel">
+    <div class="guide-title" id="guideTitle">ЖАМБАС</div>
+    <div class="guide-sub" id="guideSub">Бедренный бросок</div>
+
+    <div class="guide-img" id="guideImgWrap">
+      <img id="guideImg" src="jambass.jpg" alt="Technique" onerror="this.style.display='none';this.parentElement.textContent='No image'">
+    </div>
+
+    <div class="guide-tip" id="guideTip">
+      Держи спину ровно. AI считает: угол колена &lt; 120° (подсед) → выпрямление &gt; 160° (бросок).
+    </div>
+
+    <div>
+      <div class="input-label" style="margin-bottom:10px;">Steps</div>
+      <div class="steps-list" id="stepsList">
+        <div class="step-item"><span class="step-num">01</span> Захват пояса</div>
+        <div class="step-item"><span class="step-num">02</span> Подсед 90–120°</div>
+        <div class="step-item"><span class="step-num">03</span> Подъём через бедро</div>
+        <div class="step-item"><span class="step-num">04</span> Бросок вперёд</div>
+      </div>
+    </div>
+
+    <div class="detect-badge" id="detectBadge">📐 Угол колена + осанка</div>
+
+    <div>
+      <div class="input-label" style="margin-bottom:10px;">AI Feedback</div>
+      <div class="legend">
+        <div class="legend-row"><div class="legend-dot" style="background:var(--green)"></div> Зелёный — повтор засчитан</div>
+        <div class="legend-row"><div class="legend-dot" style="background:var(--blue)"></div> Синий — фаза выполнения</div>
+        <div class="legend-row"><div class="legend-dot" style="background:var(--red)"></div> Красный — ошибка осанки</div>
+        <div class="legend-row"><div class="legend-dot" style="background:var(--gold)"></div> Жёлтый — промежуточная фаза</div>
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════
+const state = {
+  reps: 0,
+  xp: 0,
+  drill: 'Zhambas',
+  stage: null,
+  hint: 'READY',
+  hintType: 'ready',
+  cameraStarted: false,
+};
+
+const RANKS = [
+  { name:'BALA',         icon:'🥋', min:0,    max:150,  desc:'Жас жауынгер' },
+  { name:'ZHASOSPIRIM',  icon:'⚔️', min:150,  max:500,  desc:'Үміткер батыр' },
+  { name:'BATYR',        icon:'🦅', min:500,  max:1200, desc:'Дала батыры' },
+  { name:'ҰЛТТЫҚ БАТЫР', icon:'👑', min:1200, max:9999, desc:'Мәңгілік даңқ' },
+];
+
+const DRILLS = {
+  Zhambas: {
+    title:'ЖАМБАС', sub:'Бедренный бросок',
+    img:'jambass.jpg',
+    tip:'Держи спину ровно. AI считает: угол колена < 120° (подсед) → выпрямление > 160° (бросок).',
+    steps:['Захват пояса','Подсед 90–120°','Подъём через бедро','Бросок вперёд'],
+    detect:'📐 Угол колена + осанка',
+  },
+  Shalu: {
+    title:'ШАЛУ', sub:'Подсечка',
+    img:'shalu.jpg',
+    tip:'Перенеси вес на одну ногу. AI считает разницу углов ног > 40° (перенос) → возврат в стойку.',
+    steps:['Тяни противника','Зайди сбоку','Перенос веса','Подсечка — возврат'],
+    detect:'⚖️ Разница углов ног (баланс)',
+  },
+  Koterme: {
+    title:'КӨТЕРМЕ', sub:'Подъёмный бросок',
+    img:'koterme.webp',
+    tip:'Глубже чем Жамбас! AI считает 3 фазы: присед < 100° → подъём → полное выпрямление > 165°.',
+    steps:['Глубокий захват пояса','Присед < 100°','Взрывной подъём','Полное выпрямление'],
+    detect:'🏋️ 3 фазы: < 100° → подъём → 165°+',
+  },
+};
+
+// ═══════════════════════════════════════════════
+// RANK / UI HELPERS
+// ═══════════════════════════════════════════════
+function getRank(xp) {
+  for (let i = RANKS.length - 1; i >= 0; i--)
+    if (xp >= RANKS[i].min) return RANKS[i];
+  return RANKS[0];
+}
+
+function updateUI() {
+  const rank = getRank(state.xp);
+  document.getElementById('rankIcon').textContent = rank.icon;
+  document.getElementById('rankName').textContent = rank.name;
+  document.getElementById('rankDesc').textContent = rank.desc;
+  document.getElementById('xpCurrent').textContent = state.xp + ' XP';
+  document.getElementById('xpNext').textContent = rank.max + ' XP';
+  const pct = Math.min(100, ((state.xp - rank.min) / (rank.max - rank.min)) * 100);
+  document.getElementById('xpFill').style.width = pct + '%';
+  document.getElementById('repCount').textContent = state.reps;
+  document.getElementById('xpCount').textContent = state.xp;
+
+  // Status box
+  const sb = document.getElementById('statusBox');
+  const types = { ready:'status-ready', good:'status-good', active:'status-active', warn:'status-warn' };
+  sb.className = 'status-box ' + (types[state.hintType] || 'status-ready');
+  sb.textContent = state.hint;
+}
+
+function selectDrill(drill, el) {
+  state.drill = drill;
+  state.stage = null;
+  document.querySelectorAll('.drill-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  const d = DRILLS[drill];
+  document.getElementById('guideTitle').textContent = d.title;
+  document.getElementById('guideSub').textContent = d.sub;
+  document.getElementById('guideTip').textContent = d.tip;
+  document.getElementById('detectBadge').textContent = d.detect;
+  const img = document.getElementById('guideImg');
+  img.style.display = 'block';
+  img.src = d.img;
+  const sl = document.getElementById('stepsList');
+  sl.innerHTML = d.steps.map((s,i) =>
+    `<div class="step-item"><span class="step-num">${String(i+1).padStart(2,'0')}</span> ${s}</div>`
+  ).join('');
+  updateUI();
+}
+
+function resetSession() {
+  state.reps = 0; state.xp = 0; state.stage = null;
+  state.hint = 'READY'; state.hintType = 'ready';
+  updateUI();
+}
+
+function setHint(text, type) {
+  state.hint = text; state.hintType = type;
+}
+
+// ═══════════════════════════════════════════════
+// ANGLE CALCULATION
+// ═══════════════════════════════════════════════
+function calcAngle(a, b, c) {
+  const rad = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+  let angle = Math.abs(rad * 180 / Math.PI);
+  if (angle > 180) angle = 360 - angle;
+  return angle;
+}
+
+function getKneeAngles(lm) {
+  const left  = calcAngle(lm[23], lm[25], lm[27]);
+  const right = calcAngle(lm[24], lm[26], lm[28]);
+  return { left, right, min: Math.min(left, right) };
+}
+
+function checkPosture(lm) {
+  const shoulderTilt = Math.abs(lm[11].y - lm[12].y);
+  const midShoulder = { x:(lm[11].x+lm[12].x)/2, y:(lm[11].y+lm[12].y)/2 };
+  const midHip      = { x:(lm[23].x+lm[24].x)/2, y:(lm[23].y+lm[24].y)/2 };
+  const spineLean   = Math.abs(midShoulder.x - midHip.x);
+  return shoulderTilt < 0.08 && spineLean < 0.12;
+}
+
+// ═══════════════════════════════════════════════
+// DRILL ANALYZERS
+// ═══════════════════════════════════════════════
+function analyzeZhambas(lm) {
+  const { min: knee } = getKneeAngles(lm);
+  const postureOk = checkPosture(lm);
+  if (!postureOk) { setHint('⚠️ BACK STRAIGHT!', 'warn'); return { knee, postureOk }; }
+  if (knee < 120) {
+    state.stage = 'down';
+    setHint('GOOD SQUAT — DRIVE!', 'active');
+  } else if (knee > 160 && state.stage === 'down') {
+    state.stage = 'up';
+    state.reps++; state.xp += 10;
+    setHint('✅ PERFECT!', 'good');
+    updateUI();
+  } else if (state.stage !== 'down') {
+    setHint('SQUAT TO START', 'ready');
+  }
+  return { knee, postureOk };
+}
+
+function analyzeShalu(lm) {
+  const left  = calcAngle(lm[23], lm[25], lm[27]);
+  const right = calcAngle(lm[24], lm[26], lm[28]);
+  const diff  = Math.abs(left - right);
+  const postureOk = checkPosture(lm);
+  if (!postureOk) { setHint('⚠️ LEAN FORWARD!', 'warn'); return { knee: Math.min(left,right), postureOk }; }
+  if (diff > 40 && state.stage !== 'sweep') {
+    state.stage = 'sweep';
+    setHint('SWEEP NOW!', 'active');
+  } else if (diff < 15 && state.stage === 'sweep') {
+    state.stage = null;
+    state.reps++; state.xp += 10;
+    setHint('✅ NICE SWEEP!', 'good');
+    updateUI();
+  } else if (state.stage !== 'sweep') {
+    setHint('SHIFT WEIGHT', 'ready');
+  }
+  return { knee: Math.min(left,right), postureOk };
+}
+
+function analyzeKoterme(lm) {
+  const { min: knee } = getKneeAngles(lm);
+  const postureOk = checkPosture(lm);
+  if (!postureOk) { setHint('⚠️ BEND DEEPER!', 'warn'); return { knee, postureOk }; }
+  if (knee < 100) {
+    state.stage = 'squat';
+    setHint('DEEP SQUAT — GOOD!', 'active');
+  } else if (knee >= 100 && knee < 160 && state.stage === 'squat') {
+    state.stage = 'lifting';
+    setHint('LIFT & THROW!', 'active');
+  } else if (knee > 165 && state.stage === 'lifting') {
+    state.stage = null;
+    state.reps++; state.xp += 10;
+    setHint('✅ POWERFUL LIFT!', 'good');
+    updateUI();
+  } else if (!state.stage) {
+    setHint('SQUAT DEEP < 100°', 'ready');
+  }
+  return { knee, postureOk };
+}
+
+// ═══════════════════════════════════════════════
+// CANVAS DRAWING
+// ═══════════════════════════════════════════════
+const CONNECTIONS = [
+  [11,12],[11,13],[13,15],[12,14],[14,16],
+  [11,23],[12,24],[23,24],[23,25],[24,26],[25,27],[26,28],[27,29],[28,30],[29,31],[30,32]
+];
+
+function drawSkeleton(ctx, lm, W, H, postureOk) {
+  const color = postureOk ? '#4dff8a' : '#ff4040';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.5;
+  for (const [a,b] of CONNECTIONS) {
+    if (lm[a].visibility < 0.4 || lm[b].visibility < 0.4) continue;
+    ctx.beginPath();
+    ctx.moveTo(lm[a].x * W, lm[a].y * H);
+    ctx.lineTo(lm[b].x * W, lm[b].y * H);
+    ctx.stroke();
+  }
+  for (const p of lm) {
+    if (p.visibility < 0.4) continue;
+    ctx.beginPath();
+    ctx.arc(p.x * W, p.y * H, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#f0c040';
+    ctx.fill();
+  }
+}
+
+function drawHUD(ctx, W, H, knee, postureOk) {
+  const name = document.getElementById('warriorName').value || 'Batyr';
+
+  // Top bar
+  ctx.fillStyle = 'rgba(5,8,14,0.82)';
+  ctx.fillRect(0, 0, W, 56);
+  ctx.strokeStyle = 'rgba(140,100,20,0.5)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0,56); ctx.lineTo(W,56); ctx.stroke();
+
+  // Bottom bar
+  ctx.fillStyle = 'rgba(5,8,14,0.82)';
+  ctx.fillRect(0, H-54, W, 54);
+  ctx.beginPath(); ctx.moveTo(0,H-54); ctx.lineTo(W,H-54); ctx.stroke();
+
+  // Top texts
+  ctx.fillStyle = '#e8dcc8';
+  ctx.font = '700 15px Rajdhani, sans-serif';
+  ctx.fillText(name, 14, 36);
+
+  ctx.fillStyle = '#f0c040';
+  ctx.font = '700 16px Rajdhani, sans-serif';
+  ctx.fillText(state.drill.toUpperCase(), W/2 - 40, 36);
+
+  ctx.fillStyle = '#b8860b';
+  ctx.font = '600 12px Rajdhani, sans-serif';
+  ctx.fillText('XP: ' + state.xp, W - 130, 24);
+  ctx.fillStyle = '#4dc8ff';
+  ctx.fillText('REPS: ' + state.reps, W - 130, 44);
+
+  // Bottom angle
+  if (knee !== null) {
+    ctx.fillStyle = 'rgba(150,130,80,0.9)';
+    ctx.font = '600 15px Space Mono, monospace';
+    ctx.fillText(Math.round(knee) + '°', 14, H - 16);
+  }
+
+  // Bottom hint
+  const hintColors = { ready:'#888', good:'#4dff8a', active:'#4dc8ff', warn:'#ff4040' };
+  ctx.fillStyle = hintColors[state.hintType] || '#888';
+  ctx.font = '700 17px Rajdhani, sans-serif';
+  const hw = ctx.measureText(state.hint).width;
+  ctx.fillText(state.hint, W/2 - hw/2, H - 16);
+
+  // Stage label
+  ctx.fillStyle = 'rgba(100,90,50,0.9)';
+  ctx.font = '600 12px Rajdhani, sans-serif';
+  const stageText = (state.stage || 'READY').toUpperCase();
+  ctx.fillText(stageText, W - 100, H - 16);
+
+  // Bad posture border
+  if (!postureOk) {
+    ctx.strokeStyle = 'rgba(255,40,40,0.7)';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(2, 2, W-4, H-4);
+  }
+}
+
+// ═══════════════════════════════════════════════
+// MEDIAPIPE SETUP
+// ═══════════════════════════════════════════════
+const videoEl  = document.getElementById('video');
+const canvasEl = document.getElementById('canvas');
+const ctx      = canvasEl.getContext('2d');
+
+let pose = null;
+
+function onResults(results) {
+  const W = canvasEl.width;
+  const H = canvasEl.height;
+
+  // Draw mirrored video frame
+  ctx.save();
+  ctx.scale(-1, 1);
+  ctx.drawImage(results.image, -W, 0, W, H);
+  ctx.restore();
+
+  let knee = null;
+  let postureOk = true;
+
+  if (results.poseLandmarks && results.poseLandmarks.length > 0) {
+    const lm = results.poseLandmarks.map(p => ({ x: 1 - p.x, y: p.y, z: p.z, visibility: p.visibility }));
+    postureOk = checkPosture(lm);
+
+    let res;
+    if (state.drill === 'Zhambas')  res = analyzeZhambas(lm);
+    else if (state.drill === 'Shalu')    res = analyzeShalu(lm);
+    else if (state.drill === 'Koterme') res = analyzeKoterme(lm);
+    knee = res.knee;
+    postureOk = res.postureOk;
+
+    if (!postureOk) {
+      ctx.fillStyle = 'rgba(255,0,0,0.06)';
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    drawSkeleton(ctx, lm, W, H, postureOk);
+  } else {
+    setHint('STAND IN FRAME', 'ready');
+  }
+
+  drawHUD(ctx, W, H, knee, postureOk);
+  updateUI();
+}
+
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+      audio: false
+    });
+
+    videoEl.srcObject = stream;
+    await new Promise(r => videoEl.onloadedmetadata = r);
+    videoEl.play();
+
+    canvasEl.width  = videoEl.videoWidth  || 640;
+    canvasEl.height = videoEl.videoHeight || 480;
+
+    document.getElementById('placeholder').style.display = 'none';
+    state.cameraStarted = true;
+
+    // Init MediaPipe Pose
+    pose = new Pose({
+      locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+    });
+    pose.setOptions({
+      modelComplexity: 0,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
+    pose.onResults(onResults);
+
+    // Process loop
+    async function processFrame() {
+      if (!state.cameraStarted) return;
+      await pose.send({ image: videoEl });
+      requestAnimationFrame(processFrame);
+    }
+    processFrame();
+
+  } catch (err) {
+    console.error(err);
+    document.getElementById('warnBanner').classList.add('show');
+  }
+}
+
+// Init UI
+updateUI();
+</script>
+</body>
+</html>
