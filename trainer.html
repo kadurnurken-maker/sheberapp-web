@@ -1,1114 +1,628 @@
-import streamlit as st
-import mediapipe as mp
-import cv2
-import numpy as np
-import av
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration, WebRtcMode
-import threading
-import os
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SHEBER AI — Kazakh Kuresi Coach</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@400;600;700&family=Space+Mono&display=swap" rel="stylesheet">
 
-# ─────────────────────────────────────────────
-# 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
-# ─────────────────────────────────────────────
-st.set_page_config(
-    page_title="SHEBER AI",
-    page_icon="🦅",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+<!-- MediaPipe Pose (браузерная версия — никаких серверов) -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js" crossorigin="anonymous"></script>
 
-# ─────────────────────────────────────────────
-# 2. ИНИЦИАЛИЗАЦИЯ MEDIAPIPE
-# ─────────────────────────────────────────────
-@st.cache_resource
-def get_mp_pose():
-    return mp.solutions.pose.Pose(
-        model_complexity=1,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
-        smooth_landmarks=True
-    )
-
-pose_model = get_mp_pose()
-mp_drawing = mp.solutions.drawing_utils
-mp_pose = mp.solutions.pose
-
-# ─────────────────────────────────────────────
-# 3. CSS + JS — САЙДБАР ВСЕГДА ОТКРЫТ
-# ─────────────────────────────────────────────
-st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Bebas+Neue&family=Noto+Sans:wght@300;400;600&display=swap');
+:root {
+  --bg:    #080b10; --bg2: #0d1117; --card: #111620;
+  --gold:  #f0c040; --gold2: #b8860b;
+  --text:  #e8dcc8; --muted: rgba(232,220,200,0.45);
+  --green: #4dff8a; --blue: #4dc8ff; --red: #ff4040; --orange: #ff9a00;
+  --border: rgba(240,192,64,0.15);
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 
-/* === БАЗОВЫЕ СТИЛИ === */
-.stApp {
-    background: #080b10;
-    color: #e8dcc8;
-    font-family: 'Noto Sans', sans-serif;
-}
+body{background:var(--bg);color:var(--text);font-family:'Rajdhani',sans-serif;min-height:100vh;overflow-x:hidden}
 
-#MainMenu, footer, header { visibility: hidden; }
-.block-container { padding-top: 1.5rem !important; max-width: 1400px; }
+/* NAV */
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;background:rgba(8,11,16,.92);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}
+.logo{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:4px;color:var(--gold);text-shadow:0 0 30px rgba(240,192,64,.3)}
+.logo span{color:var(--muted);font-size:12px;letter-spacing:2px;margin-left:8px;font-family:'Rajdhani',sans-serif}
+.nav-links a{color:var(--muted);font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;text-decoration:none;margin-left:20px;transition:color .2s}
+.nav-links a:hover{color:var(--gold)}
 
-/* ═══════════════════════════════════════════
-   САЙДБАР — ВСЕГДА ВИДЕН, НИКОГДА НЕ ЗАКРЫВАЕТСЯ
-   ═══════════════════════════════════════════ */
+/* LAYOUT */
+.app{display:grid;grid-template-columns:280px 1fr 240px;min-height:calc(100vh - 49px)}
 
-/* Скрываем ВСЕ кнопки сворачивания/разворачивания */
-button[kind="header"],
-[data-testid="collapsedControl"],
-[data-testid="stSidebarCollapseButton"],
-[data-testid="stSidebarNavCollapseIcon"],
-section[data-testid="stSidebar"] > div > div > div > button,
-.st-emotion-cache-1cypcdb,
-.st-emotion-cache-wc0xt,
-.eczjsme0,
-.eczjsme4 {
-    display: none !important;
-    visibility: hidden !important;
-    pointer-events: none !important;
-    width: 0 !important;
-    height: 0 !important;
-    overflow: hidden !important;
-}
+/* SIDEBAR */
+.sidebar{background:var(--bg2);border-right:1px solid var(--border);padding:20px 16px;display:flex;flex-direction:column;gap:16px;overflow-y:auto}
+.sb-title{font-family:'Bebas Neue',sans-serif;font-size:17px;letter-spacing:4px;color:var(--gold);border-bottom:1px solid var(--border);padding-bottom:8px}
 
-/* Принудительно держим сайдбар раскрытым */
-[data-testid="stSidebar"] {
-    display: flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    transform: none !important;
-    min-width: 320px !important;
-    max-width: 320px !important;
-    width: 320px !important;
-    background: #060911 !important;
-    border-right: 1px solid rgba(240,192,64,0.1) !important;
-    position: relative !important;
-    left: 0 !important;
-    transition: none !important;
-}
+.rank-block{background:rgba(240,192,64,.05);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center}
+.rank-icon{font-size:36px;line-height:1;margin-bottom:4px}
+.rank-name{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:4px;color:var(--gold)}
+.rank-desc{font-size:11px;color:var(--muted);letter-spacing:2px;margin-top:2px}
+.xp-bar-wrap{margin-top:12px}
+.xp-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:5px}
+.xp-track{background:rgba(255,255,255,.06);border-radius:4px;height:5px;overflow:hidden}
+.xp-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--gold2),var(--gold),#ffd700);box-shadow:0 0 8px rgba(240,192,64,.4);transition:width .5s ease}
 
-/* Фиксим на мобильных */
-@media (max-width: 992px) {
-    [data-testid="stSidebar"] {
-        display: flex !important;
-        min-width: 280px !important;
-        max-width: 280px !important;
-        width: 280px !important;
-        position: relative !important;
-        z-index: 999 !important;
-    }
-    .main .block-container {
-        padding-left: 1rem !important;
-    }
-}
+.metric-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.metric{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center}
+.metric-val{font-family:'Bebas Neue',sans-serif;font-size:28px;line-height:1;color:var(--gold)}
+.metric-val.blue{color:var(--blue)} .metric-val.green{color:var(--green)}
+.metric-lbl{font-size:9px;color:var(--muted);letter-spacing:2px;margin-top:3px}
 
-[data-testid="stSidebar"] .stMarkdown h3 {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 1.4rem;
-    letter-spacing: 3px;
-    color: #f0c040;
-    border-bottom: 1px solid rgba(240,192,64,0.2);
-    padding-bottom: 8px;
-    margin-bottom: 16px;
-}
-[data-testid="stSidebar"] label {
-    font-family: 'Rajdhani', sans-serif !important;
-    font-size: 0.75rem !important;
-    letter-spacing: 2px !important;
-    color: #7a6a4a !important;
-    text-transform: uppercase !important;
-}
-[data-testid="stSidebar"] input,
-[data-testid="stSidebar"] select,
-[data-testid="stSidebar"] .stSelectbox > div > div {
-    background: rgba(240,192,64,0.05) !important;
-    border: 1px solid rgba(240,192,64,0.2) !important;
-    border-radius: 6px !important;
-    color: #e8dcc8 !important;
-    font-family: 'Rajdhani', sans-serif !important;
-}
-[data-testid="stSidebar"] input:focus {
-    border-color: rgba(240,192,64,0.5) !important;
-    box-shadow: 0 0 0 2px rgba(240,192,64,0.1) !important;
-}
+.status-box{border-radius:8px;padding:10px 12px;font-size:13px;font-weight:700;letter-spacing:2px;text-align:center;min-height:40px;display:flex;align-items:center;justify-content:center;transition:all .3s}
+.s-ready {background:rgba(232,220,200,.05);border:1px solid rgba(232,220,200,.1);color:var(--muted)}
+.s-good  {background:rgba(77,255,138,.1); border:1px solid rgba(77,255,138,.3); color:var(--green)}
+.s-active{background:rgba(77,200,255,.1); border:1px solid rgba(77,200,255,.3); color:var(--blue)}
+.s-warn  {background:rgba(255,64,64,.1);  border:1px solid rgba(255,64,64,.4);  color:var(--red)}
 
-/* === HERO ЗАГОЛОВОК === */
-.hero-wrap {
-    text-align: center;
-    padding: 10px 0 5px;
-    position: relative;
-}
-.hero-eyebrow {
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 0.85rem;
-    font-weight: 600;
-    letter-spacing: 6px;
-    color: #b8860b;
-    text-transform: uppercase;
-    margin-bottom: 4px;
-}
-.hero-title {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 4.5rem;
-    line-height: 1;
-    color: #f0c040;
-    letter-spacing: 4px;
-    text-shadow: 0 0 40px rgba(240, 192, 64, 0.25), 0 2px 0 #7a5500;
-}
-.hero-subtitle {
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 1rem;
-    font-weight: 400;
-    letter-spacing: 3px;
-    color: #8a7a60;
-    margin-top: 2px;
-}
-.hero-line {
-    width: 120px;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, #f0c040, transparent);
-    margin: 12px auto;
-}
+.input-lbl{font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:5px}
+.name-inp{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-family:'Rajdhani',sans-serif;font-size:14px;letter-spacing:1px;width:100%;outline:none;transition:border-color .2s}
+.name-inp:focus{border-color:rgba(240,192,64,.5)}
 
-/* === МЕТРИЧЕСКИЕ КАРТОЧКИ === */
-.metrics-row {
-    display: flex;
-    gap: 16px;
-    margin: 16px 0;
-}
-.metric-card {
-    flex: 1;
-    background: linear-gradient(135deg, rgba(240,192,64,0.05) 0%, rgba(8,11,16,0) 100%);
-    border: 1px solid rgba(240,192,64,0.15);
-    border-top: 2px solid #f0c040;
-    border-radius: 4px 4px 12px 12px;
-    padding: 18px 20px 14px;
-    position: relative;
-    overflow: hidden;
-}
-.metric-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(240,192,64,0.6), transparent);
-}
-.metric-label {
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 3px;
-    color: #7a6a4a;
-    text-transform: uppercase;
-    margin-bottom: 6px;
-}
-.metric-value {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 2.2rem;
-    line-height: 1;
-    color: #f0c040;
-    letter-spacing: 2px;
-}
-.metric-value.blue { color: #4dc8ff; }
-.metric-value.green { color: #4dff8a; }
-.metric-value.red { color: #ff6b4d; }
+.drill-list{display:flex;flex-direction:column;gap:7px}
+.drill-btn{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:all .2s;color:var(--muted);font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase}
+.drill-btn:hover{border-color:rgba(240,192,64,.4);color:var(--text)}
+.drill-btn.active{border-color:var(--gold);color:var(--gold);background:rgba(240,192,64,.07)}
+.drill-icon{font-size:18px}
+.drill-sub{font-size:9px;color:var(--muted);letter-spacing:1px;font-weight:400;margin-top:1px}
 
-/* XP Прогресс бар */
-.xp-track {
-    background: rgba(255,255,255,0.07);
-    border-radius: 3px;
-    height: 5px;
-    margin-top: 10px;
-    overflow: hidden;
-}
-.xp-fill {
-    background: linear-gradient(90deg, #b8860b, #f0c040, #ffd700);
-    height: 100%;
-    border-radius: 3px;
-    transition: width 0.5s ease;
-    box-shadow: 0 0 8px rgba(240,192,64,0.5);
-}
-.xp-caption {
-    font-size: 0.65rem;
-    color: #5a4a2a;
-    margin-top: 4px;
-    font-family: 'Rajdhani', sans-serif;
-    letter-spacing: 2px;
-}
+.reset-btn{background:rgba(240,192,64,.08);border:1px solid rgba(240,192,64,.2);color:var(--gold);border-radius:8px;padding:10px;font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:3px;cursor:pointer;transition:all .2s;width:100%}
+.reset-btn:hover{background:rgba(240,192,64,.15);border-color:var(--gold)}
 
-/* === ВИДЕО ЗОНА === */
-.video-container {
-    border: 1px solid rgba(240,192,64,0.25);
-    border-radius: 12px;
-    overflow: hidden;
-    background: #040608;
-    position: relative;
-}
-.video-header {
-    background: rgba(240,192,64,0.07);
-    border-bottom: 1px solid rgba(240,192,64,0.15);
-    padding: 10px 16px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-.live-dot {
-    width: 8px; height: 8px;
-    background: #ff3333;
-    border-radius: 50%;
-    box-shadow: 0 0 6px #ff3333;
-    animation: pulse 1.5s infinite;
-}
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-}
-.video-title-text {
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 0.8rem;
-    font-weight: 600;
-    letter-spacing: 3px;
-    color: #8a7a60;
-    text-transform: uppercase;
-}
+/* MAIN */
+.main{display:flex;flex-direction:column;background:#040608}
+.vid-header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:rgba(240,192,64,.05);border-bottom:1px solid var(--border);flex-shrink:0}
+.live-dot{width:8px;height:8px;background:var(--red);border-radius:50%;box-shadow:0 0 6px var(--red);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.vid-lbl{font-size:11px;font-weight:700;letter-spacing:3px;color:var(--muted);text-transform:uppercase}
 
-/* === КНОПКИ === */
-.stButton > button {
-    width: 100%;
-    background: linear-gradient(135deg, #8a6500, #c8960a) !important;
-    color: #080b10 !important;
-    font-family: 'Bebas Neue', sans-serif !important;
-    font-size: 1.1rem !important;
-    letter-spacing: 3px !important;
-    border: none !important;
-    border-radius: 6px !important;
-    padding: 10px !important;
-    transition: all 0.2s !important;
-}
-.stButton > button:hover {
-    background: linear-gradient(135deg, #c8960a, #f0c040) !important;
-    box-shadow: 0 4px 20px rgba(240,192,64,0.3) !important;
-    transform: translateY(-1px) !important;
-}
+.vid-wrap{position:relative;flex:1;display:flex;align-items:center;justify-content:center;min-height:0}
+#videoEl{display:none}
+#canvasEl{width:100%;height:100%;max-height:calc(100vh - 200px);object-fit:contain;display:block}
 
-/* === ГАЙД КАРТОЧКИ === */
-.guide-card {
-    background: rgba(240,192,64,0.04);
-    border: 1px solid rgba(240,192,64,0.12);
-    border-left: 3px solid #f0c040;
-    border-radius: 0 8px 8px 0;
-    padding: 14px 16px;
-    margin-top: 12px;
-}
-.guide-move-title {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 1.3rem;
-    letter-spacing: 2px;
-    color: #f0c040;
-    margin-bottom: 4px;
-}
-.guide-tip {
-    font-size: 0.85rem;
-    color: #8a7a60;
-    line-height: 1.6;
-}
+.placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:var(--muted)}
+.cam-icon{font-size:56px;opacity:.2}
+.cam-lbl{font-size:12px;letter-spacing:3px;text-transform:uppercase;opacity:.4}
+.start-btn{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#080b10;border:none;border-radius:10px;padding:14px 36px;font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:4px;cursor:pointer;transition:all .2s;box-shadow:0 4px 24px rgba(240,192,64,.3)}
+.start-btn:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(240,192,64,.4)}
+.err-msg{font-size:11px;color:var(--red);letter-spacing:1px;text-align:center;display:none;padding:0 20px;line-height:1.6}
 
-/* === РАНГОВЫЙ БЕЙДЖ === */
-.sidebar-rank {
-    text-align: center;
-    padding: 16px;
-    background: rgba(240,192,64,0.05);
-    border: 1px solid rgba(240,192,64,0.15);
-    border-radius: 10px;
-    margin-bottom: 16px;
-}
-.sidebar-rank-icon { font-size: 2.5rem; }
-.sidebar-rank-name {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 1.6rem;
-    letter-spacing: 4px;
-    color: #f0c040;
-}
-.sidebar-rank-desc {
-    font-size: 0.72rem;
-    color: #5a4a2a;
-    font-family: 'Rajdhani', sans-serif;
-    letter-spacing: 2px;
-}
+/* GUIDE */
+.guide{background:var(--bg2);border-left:1px solid var(--border);padding:20px 16px;display:flex;flex-direction:column;gap:14px;overflow-y:auto}
+.guide-title{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:3px;color:var(--gold)}
+.guide-sub{font-size:10px;color:var(--muted);letter-spacing:2px;margin-top:-8px}
+.guide-img-wrap{width:100%;border-radius:10px;overflow:hidden;background:var(--card);border:1px solid var(--border);aspect-ratio:4/3}
+.guide-img-wrap img{width:100%;height:100%;object-fit:cover}
+.guide-tip{background:rgba(240,192,64,.05);border-left:2px solid var(--gold2);border-radius:0 8px 8px 0;padding:10px 12px;font-size:12px;line-height:1.7;color:rgba(232,220,200,.7)}
+.steps-list{display:flex;flex-direction:column;gap:7px}
+.step{display:flex;gap:8px;font-size:12px;color:var(--text)}
+.step-n{font-family:'Space Mono',monospace;font-size:9px;color:var(--gold);background:rgba(240,192,64,.1);border-radius:4px;padding:2px 5px;min-width:20px;text-align:center;margin-top:1px}
+.detect-badge{background:rgba(77,200,255,.08);border:1px solid rgba(77,200,255,.2);border-radius:6px;padding:7px 10px;font-size:10px;color:var(--blue);letter-spacing:1px}
+.legend{display:flex;flex-direction:column;gap:5px}
+.leg-row{display:flex;align-items:center;gap:7px;font-size:11px}
+.leg-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 
-.divider {
-    border: none;
-    border-top: 1px solid rgba(240,192,64,0.1);
-    margin: 20px 0;
+/* DEPTH BAR overlay */
+#depthBarWrap{position:absolute;bottom:62px;left:50%;transform:translateX(-50%);width:180px;display:none;flex-direction:column;align-items:center;gap:3px}
+#depthBarWrap span{font-size:9px;color:rgba(150,130,80,.8);letter-spacing:2px}
+#depthTrack{width:180px;height:5px;background:rgba(40,40,40,.8);border-radius:3px;overflow:hidden}
+#depthFill{height:100%;width:0%;background:var(--blue);border-radius:3px;transition:width .1s}
+
+@media(max-width:900px){
+  .app{grid-template-columns:1fr}
+  .sidebar,.guide{display:none}
 }
 </style>
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="logo">🦅 SHEBER<span>AI · No-Server Edition</span></div>
+  <div class="nav-links">
+    <a href="index.html">Home</a>
+    <a href="process.html">Development</a>
+  </div>
+</nav>
+
+<div class="app">
+
+  <!-- ══ LEFT SIDEBAR ══ -->
+  <aside class="sidebar">
+    <div class="sb-title">🦅 Warrior Profile</div>
+
+    <div>
+      <div class="input-lbl">Warrior Name</div>
+      <input class="name-inp" id="nameInp" type="text" value="Batyr" maxlength="20">
+    </div>
+
+    <div class="rank-block">
+      <div class="rank-icon" id="rankIcon">🥋</div>
+      <div class="rank-name" id="rankName">BALA</div>
+      <div class="rank-desc" id="rankDesc">Жас жауынгер</div>
+      <div class="xp-bar-wrap">
+        <div class="xp-labels"><span id="xpCur">0 XP</span><span id="xpNext">150 XP</span></div>
+        <div class="xp-track"><div class="xp-fill" id="xpFill" style="width:0%"></div></div>
+      </div>
+    </div>
+
+    <div class="metric-row">
+      <div class="metric"><div class="metric-val blue" id="repCount">0</div><div class="metric-lbl">Reps</div></div>
+      <div class="metric"><div class="metric-val" id="xpCount">0</div><div class="metric-lbl">XP</div></div>
+    </div>
+
+    <div class="status-box s-ready" id="statusBox">READY</div>
+
+    <div>
+      <div class="input-lbl" style="margin-bottom:8px">Select Drill</div>
+      <div class="drill-list">
+        <div class="drill-btn active" onclick="selectDrill('Zhambas',this)">
+          <span class="drill-icon">🤸</span>
+          <div><div>Zhambas</div><div class="drill-sub">Бедренный бросок</div></div>
+        </div>
+        <div class="drill-btn" onclick="selectDrill('Shalu',this)">
+          <span class="drill-icon">⚡</span>
+          <div><div>Shalu</div><div class="drill-sub">Подсечка</div></div>
+        </div>
+        <div class="drill-btn" onclick="selectDrill('Koterme',this)">
+          <span class="drill-icon">🏋️</span>
+          <div><div>Köterme</div><div class="drill-sub">Подъёмный бросок</div></div>
+        </div>
+      </div>
+    </div>
+
+    <button class="reset-btn" onclick="resetSession()">⟳ RESET SESSION</button>
+  </aside>
+
+  <!-- ══ VIDEO ══ -->
+  <main class="main">
+    <div class="vid-header">
+      <div class="live-dot"></div>
+      <span class="vid-lbl">Live · MediaPipe · 100% In-Browser · No Server Needed</span>
+    </div>
+    <div class="vid-wrap">
+      <video id="videoEl" playsinline autoplay muted></video>
+      <canvas id="canvasEl"></canvas>
+
+      <!-- Depth bar -->
+      <div id="depthBarWrap">
+        <span>SQUAT DEPTH</span>
+        <div id="depthTrack"><div id="depthFill"></div></div>
+      </div>
+
+      <!-- Placeholder before start -->
+      <div class="placeholder" id="placeholder">
+        <div class="cam-icon">📷</div>
+        <div class="cam-lbl">Camera not started</div>
+        <button class="start-btn" onclick="startCamera()">▶ START TRAINING</button>
+        <div class="err-msg" id="errMsg">
+          Camera permission denied.<br>
+          Click the 🔒 lock icon in the address bar → allow camera → refresh page.
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ══ GUIDE ══ -->
+  <aside class="guide">
+    <div class="guide-title" id="guideTitle">ЖАМБАС</div>
+    <div class="guide-sub" id="guideSub">Бедренный бросок</div>
+    <div class="guide-img-wrap">
+      <img id="guideImg" src="jambass.jpg" alt="Technique" onerror="this.style.opacity='.1'">
+    </div>
+    <div class="guide-tip" id="guideTip">
+      Держи спину ровно. AI засчитывает: стойка → подсед &lt;115° → взрыв вверх &gt;158°. Минимальная амплитуда 40°.
+    </div>
+    <div>
+      <div class="input-lbl" style="margin-bottom:8px">Steps</div>
+      <div class="steps-list" id="stepsList">
+        <div class="step"><span class="step-n">01</span>Захват пояса</div>
+        <div class="step"><span class="step-n">02</span>Подсед 90–115°</div>
+        <div class="step"><span class="step-n">03</span>Взрывной подъём</div>
+        <div class="step"><span class="step-n">04</span>Бросок вперёд</div>
+      </div>
+    </div>
+    <div class="detect-badge" id="detectBadge">📐 Угол колена + минимальная амплитуда 40°</div>
+    <div>
+      <div class="input-lbl" style="margin-bottom:8px">AI Feedback Colors</div>
+      <div class="legend">
+        <div class="leg-row"><div class="leg-dot" style="background:var(--green)"></div>Зелёный — повтор засчитан ✅</div>
+        <div class="leg-row"><div class="leg-dot" style="background:var(--blue)"></div>Синий — активная фаза броска</div>
+        <div class="leg-row"><div class="leg-dot" style="background:var(--orange)"></div>Оранжевый — фаза подъёма</div>
+        <div class="leg-row"><div class="leg-dot" style="background:var(--red)"></div>Красный — ошибка / недостаточно</div>
+        <div class="leg-row"><div class="leg-dot" style="background:var(--gold)"></div>Жёлтый — готовность / стойка</div>
+      </div>
+    </div>
+  </aside>
+
+</div><!-- /app -->
 
 <script>
-// Принудительно открываем сайдбар и блокируем кнопку закрытия
-(function keepSidebarOpen() {
-    function forceOpen() {
-        // Убираем класс "collapsed" с body/html если Streamlit его ставит
-        document.body.classList.remove('sidebar-collapsed');
+// ═══════════════════════════════════════════════
+//  ДАННЫЕ
+// ═══════════════════════════════════════════════
+const RANKS = [
+  {name:'BALA',        icon:'🥋',min:0,   max:150, desc:'Жас жауынгер'},
+  {name:'ZHASOSPIRIM', icon:'⚔️',min:150, max:500, desc:'Үміткер батыр'},
+  {name:'BATYR',       icon:'🦅',min:500, max:1200,desc:'Дала батыры'},
+  {name:'ҰЛТТЫҚ БАТЫР',icon:'👑',min:1200,max:9999,desc:'Мәңгілік даңқ'},
+];
 
-        // Ищем кнопки сворачивания и скрываем их
-        const selectors = [
-            '[data-testid="collapsedControl"]',
-            '[data-testid="stSidebarCollapseButton"]',
-            'button[aria-label="Close sidebar"]',
-            'button[aria-label="Collapse sidebar"]',
-            'button[title="Collapse sidebar"]',
-        ];
-        selectors.forEach(sel => {
-            document.querySelectorAll(sel).forEach(btn => {
-                btn.style.display = 'none';
-                btn.style.visibility = 'hidden';
-                btn.style.pointerEvents = 'none';
-                // Перехватываем клик если кнопка всё же появилась
-                btn.addEventListener('click', e => {
-                    e.stopImmediatePropagation();
-                    e.preventDefault();
-                }, true);
-            });
-        });
+const DRILLS = {
+  Zhambas:{
+    title:'ЖАМБАС',sub:'Бедренный бросок',img:'jambass.jpg',
+    tip:'Держи спину ровно. AI засчитывает: стойка → подсед <115° → взрыв вверх >158°. Мин. амплитуда 40°.',
+    steps:['Захват пояса','Подсед 90–115°','Взрывной подъём','Бросок вперёд'],
+    detect:'📐 Угол колена + минимальная амплитуда 40°',
+  },
+  Shalu:{
+    title:'ШАЛУ',sub:'Подсечка',img:'shalu.jpg',
+    tip:'AI считает разницу углов левой/правой ноги. Перенос >45° → возврат в стойку <22° = засчитано.',
+    steps:['Тяни противника','Зайди сбоку','Перенос веса (diff>45°)','Возврат в стойку'],
+    detect:'⚖️ Разница углов ног > 45° → возврат < 22°',
+  },
+  Koterme:{
+    title:'КӨТЕРМЕ',sub:'Подъёмный бросок',img:'koterme.webp',
+    tip:'4 фазы: стойка → глубокий присед <95° → промежуточный подъём → полное выпрямление >158°. Амплитуда 55°.',
+    steps:['Захват пояса','Глубокий присед <95°','Контролируемый подъём','Полное выпрямление'],
+    detect:'🏋️ 4 фазы + амплитуда 55°',
+  },
+};
 
-        // Если сайдбар схлопнулся — разворачиваем
-        const sidebar = document.querySelector('[data-testid="stSidebar"]');
-        if (sidebar) {
-            sidebar.style.display = 'flex';
-            sidebar.style.visibility = 'visible';
-            sidebar.style.opacity = '1';
-            sidebar.style.transform = 'none';
-            sidebar.style.minWidth = '320px';
-            sidebar.style.width = '320px';
-        }
-    }
+// ═══════════════════════════════════════════════
+//  СОСТОЯНИЕ
+// ═══════════════════════════════════════════════
+const S = {
+  reps:0, xp:0,
+  drill:'Zhambas',
+  // машина фаз
+  phase:'READY',      // READY | STANDING | DOWN | DEEP | LIFTING | SWEEP
+  phaseFrame:0,
+  cooldown:0,
+  peakDown:180,
+  startAngle:null,
+  // HUD
+  hint:'STAND STRAIGHT',
+  hintColor:'gold',   // gold | green | blue | red | orange | gray
+  running:false,
+};
 
-    // Запускаем сразу и через интервал (Streamlit рендерит асинхронно)
-    forceOpen();
-    setInterval(forceOpen, 500);
-
-    // Также следим за изменениями DOM
-    const observer = new MutationObserver(forceOpen);
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true });
-})();
-</script>
-""", unsafe_allow_html=True)
-
-# ─────────────────────────────────────────────
-# 4. КОНФИГУРАЦИЯ СЕТИ (WebRTC)
-# ─────────────────────────────────────────────
-RTC_CONFIG = RTCConfiguration({
-    "iceServers": [
-        {"urls": ["stun:stun.l.google.com:19302"]},
-        {"urls": ["stun:stun1.l.google.com:19302"]},
-        {"urls": ["stun:stun2.l.google.com:19302"]},
-    ]
-})
-
-# ─────────────────────────────────────────────
-# 5. СИСТЕМА РЕЙТИНГА
-# ─────────────────────────────────────────────
-RANKS = [
-    {"name": "BALA",         "icon": "🥋", "min": 0,    "max": 150,  "desc": "Жас жауынгер"},
-    {"name": "ZHASOSPIRIM",  "icon": "⚔️", "min": 150,  "max": 500,  "desc": "Үміткер батыр"},
-    {"name": "BATYR",        "icon": "🦅", "min": 500,  "max": 1200, "desc": "Дала батыры"},
-    {"name": "ҰЛТТЫҚ БАТЫР", "icon": "👑", "min": 1200, "max": 9999, "desc": "Мәңгілік даңқ"},
-]
-
-def get_rank(xp):
-    for r in reversed(RANKS):
-        if xp >= r["min"]:
-            return r
-    return RANKS[0]
-
-def get_rank_progress(xp):
-    rank = get_rank(xp)
-    span = rank["max"] - rank["min"]
-    earned = xp - rank["min"]
-    return min(int((earned / span) * 100), 100), rank["max"]
-
-# ─────────────────────────────────────────────
-# 6. ДАННЫЕ СЕССИИ
-# ─────────────────────────────────────────────
-defaults = {
-    "xp": 0,
-    "reps": 0,
-    "name": "Batyr",
-    "move": "Zhambas",
+// ═══════════════════════════════════════════════
+//  UI HELPERS
+// ═══════════════════════════════════════════════
+function getRank(xp){
+  for(let i=RANKS.length-1;i>=0;i--) if(xp>=RANKS[i].min) return RANKS[i];
+  return RANKS[0];
 }
-for k, v in defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
-
-# ─────────────────────────────────────────────
-# 7. AI ENGINE — THREAD-SAFE СЧЁТЧИК
-# ─────────────────────────────────────────────
-_global_reps = 0
-_global_xp   = 0
-_lock = threading.Lock()
-
-def increment_rep():
-    global _global_reps, _global_xp
-    with _lock:
-        _global_reps += 1
-        _global_xp   += 10
-
-def reset_global():
-    global _global_reps, _global_xp
-    with _lock:
-        _global_reps = 0
-        _global_xp   = 0
-
-def get_global_stats():
-    with _lock:
-        return _global_reps, _global_xp
-
-
-class SheberAI(VideoProcessorBase):
-    """
-    Строгая многофазная система оценки бросков.
-
-    Чтобы бросок ЗАСЧИТАЛСЯ, нужно пройти все фазы по порядку:
-
-    ZHAMBAS  (бедренный бросок):
-      1. СТОЙКА  — колено > 155° (стоишь прямо)
-      2. ПОДСЕД  — колено опускается до < 115° (глубокий подсед, мин. амплитуда 45°)
-      3. БРОСОК  — колено возвращается > 160° И скорость разгибания быстрая
-
-    SHALU  (подсечка):
-      1. СТОЙКА  — обе ноги примерно одинаково (разница < 20°)
-      2. ПЕРЕНОС — разница углов левой/правой ноги > 45° (вес на одну ногу)
-      3. ПОДСЕЧКА — разница возвращается < 20° (возврат в стойку — бросок засчитан)
-
-    KOTERME  (подъёмный бросок):
-      1. СТОЙКА  — колено > 155°
-      2. ГЛУБОКИЙ ПРИСЕД — колено < 95° (глубже чем Жамбас)
-      3. ПОДЪЁМ  — промежуточная фаза 95-145° (контролируем что идёт подъём)
-      4. БРОСОК  — колено > 160° (полное выпрямление)
-
-    Дополнительные защиты от читерства:
-    - min_amplitude: минимальная амплитуда за движение
-    - cooldown_frames: блокировка после засчитанного репа (40 кадров ≈ 1.5 сек)
-    - phase_timeout: если застрял в фазе > 120 кадров — сброс (≈ 5 сек)
-    - visibility_check: если ключевые суставы не видны — не считаем
-    """
-
-    def __init__(self):
-        self.pose  = pose_model
-        self.current_name = "Batyr"
-        self.current_move = "Zhambas"
-        self._local_reps = 0
-        self._local_xp   = 0
-
-        # ── Состояние машины фаз ──────────────────
-        self.phase          = "READY"      # текущая фаза
-        self.phase_frame    = 0            # сколько кадров в текущей фазе
-        self.cooldown       = 0            # кадры до следующего разрешённого репа
-        self.peak_down      = 180.0        # минимальный угол достигнутый в подседе
-        self.start_angle    = None         # угол в момент начала движения
-
-        # ── HUD ──────────────────────────────────
-        self.hint       = "STAND STRAIGHT"
-        self.hint_color = (180, 160, 100)
-
-    # ─── ВЫЧИСЛЕНИЕ УГЛА ─────────────────────────
-    def angle3(self, a, b, c):
-        a, b, c = np.array(a), np.array(b), np.array(c)
-        r = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
-        ang = np.abs(r * 180.0 / np.pi)
-        return 360 - ang if ang > 180 else ang
-
-    def lm(self, lms, idx):
-        p = lms[idx.value]
-        return [p.x, p.y], p.visibility
-
-    # ─── ПРОВЕРКА ВИДИМОСТИ ──────────────────────
-    def visible(self, lms, *indices, threshold=0.55):
-        """Возвращает True только если ВСЕ суставы достаточно видны."""
-        for idx in indices:
-            if lms[idx.value].visibility < threshold:
-                return False
-        return True
-
-    # ─── ПОЛУЧЕНИЕ УГЛОВ КОЛЕНЕЙ ─────────────────
-    def knee_angles(self, lms):
-        LP = mp_pose.PoseLandmark
-        vis_left  = self.visible(lms, LP.LEFT_HIP,  LP.LEFT_KNEE,  LP.LEFT_ANKLE)
-        vis_right = self.visible(lms, LP.RIGHT_HIP, LP.RIGHT_KNEE, LP.RIGHT_ANKLE)
-
-        l_ang = r_ang = None
-        if vis_left:
-            lh, _ = self.lm(lms, LP.LEFT_HIP)
-            lk, _ = self.lm(lms, LP.LEFT_KNEE)
-            la, _ = self.lm(lms, LP.LEFT_ANKLE)
-            l_ang = self.angle3(lh, lk, la)
-        if vis_right:
-            rh, _ = self.lm(lms, LP.RIGHT_HIP)
-            rk, _ = self.lm(lms, LP.RIGHT_KNEE)
-            ra, _ = self.lm(lms, LP.RIGHT_ANKLE)
-            r_ang = self.angle3(rh, rk, ra)
-
-        if l_ang is None and r_ang is None:
-            return None, None, None
-        if l_ang is None:   return r_ang, r_ang, r_ang
-        if r_ang is None:   return l_ang, l_ang, l_ang
-        return l_ang, r_ang, min(l_ang, r_ang)
-
-    # ═══════════════════════════════════════════════
-    # ЖАМБАС — 3 обязательные фазы
-    # ═══════════════════════════════════════════════
-    def analyze_zhambas(self, lms):
-        _, _, knee = self.knee_angles(lms)
-        if knee is None:
-            self.hint = "SHOW LEGS TO CAMERA"
-            self.hint_color = (120, 120, 120)
-            return None
-
-        STAND_THRESH  = 155   # стойка: нога прямая
-        DOWN_THRESH   = 115   # подсед: глубокий присед
-        UP_THRESH     = 158   # бросок: нога выпрямляется
-        MIN_AMPLITUDE = 40    # минимальная амплитуда (иначе "не считается")
-        COOLDOWN      = 40    # кадров паузы после репа
-        TIMEOUT       = 120   # кадров до сброса если застрял
-
-        # Кулдаун — блокируем новый реп
-        if self.cooldown > 0:
-            self.cooldown -= 1
-            self.hint = "GOOD! REST..."
-            self.hint_color = (64, 255, 100)
-            return knee
-
-        self.phase_frame += 1
-
-        # ── Фаза 1: READY — ждём прямую стойку ───
-        if self.phase == "READY":
-            if knee > STAND_THRESH:
-                self.hint = "READY — START SQUAT"
-                self.hint_color = (180, 160, 100)
-            else:
-                self.hint = "STAND STRAIGHT FIRST"
-                self.hint_color = (200, 100, 50)
-
-            if knee > STAND_THRESH:
-                self.phase      = "STANDING"
-                self.start_angle = knee
-                self.peak_down  = knee
-                self.phase_frame = 0
-
-        # ── Фаза 2: STANDING — начало подседа ────
-        elif self.phase == "STANDING":
-            if self.phase_frame > TIMEOUT:
-                self.phase = "READY"
-                self.phase_frame = 0
-
-            if knee < self.peak_down:
-                self.peak_down = knee  # запоминаем глубину
-
-            if knee < DOWN_THRESH:
-                # Проверяем амплитуду: должен опуститься минимум на MIN_AMPLITUDE
-                amplitude = (self.start_angle or 170) - knee
-                if amplitude >= MIN_AMPLITUDE:
-                    self.phase = "DOWN"
-                    self.phase_frame = 0
-                    self.hint = "DEEP! NOW DRIVE UP!"
-                    self.hint_color = (64, 180, 255)
-                else:
-                    self.hint = "SQUAT DEEPER!"
-                    self.hint_color = (200, 120, 50)
-            else:
-                self.hint = "SQUAT — BEND KNEES"
-                self.hint_color = (180, 180, 100)
-
-        # ── Фаза 3: DOWN — ждём взрывного подъёма
-        elif self.phase == "DOWN":
-            if self.phase_frame > TIMEOUT:
-                # Застрял внизу — сбрасываем без репа
-                self.phase = "READY"
-                self.phase_frame = 0
-                self.hint = "TIMEOUT — TRY AGAIN"
-                self.hint_color = (200, 80, 50)
-                return knee
-
-            if knee < self.peak_down:
-                self.peak_down = knee
-
-            if knee > UP_THRESH:
-                # Проверяем реальную амплитуду всего движения
-                real_amplitude = knee - self.peak_down
-                if real_amplitude >= MIN_AMPLITUDE:
-                    # ✅ БРО ЗАСЧИТАН
-                    increment_rep()
-                    self._local_reps, self._local_xp = get_global_stats()
-                    self.phase    = "READY"
-                    self.cooldown = COOLDOWN
-                    self.peak_down = 180
-                    self.phase_frame = 0
-                    self.hint = "✅ THROW COUNTED!"
-                    self.hint_color = (64, 255, 100)
-                else:
-                    # Мало амплитуды — не засчитываем
-                    self.phase = "READY"
-                    self.phase_frame = 0
-                    self.hint = "NOT DEEP ENOUGH!"
-                    self.hint_color = (200, 80, 50)
-            else:
-                self.hint = "PUSH UP — EXPLOSIVE!"
-                self.hint_color = (64, 180, 255)
-
-        return knee
-
-    # ═══════════════════════════════════════════════
-    # ШАЛУ — 3 обязательные фазы (разница углов ног)
-    # ═══════════════════════════════════════════════
-    def analyze_shalu(self, lms):
-        l_ang, r_ang, _ = self.knee_angles(lms)
-        if l_ang is None or r_ang is None:
-            self.hint = "SHOW BOTH LEGS"
-            self.hint_color = (120, 120, 120)
-            return None
-
-        diff = abs(l_ang - r_ang)
-
-        STAND_DIFF  = 20   # обе ноги почти одинаковы — стойка
-        SWEEP_DIFF  = 45   # одна нога резко согнута — подсечка
-        RETURN_DIFF = 22   # вернулись в стойку — засчитываем
-        COOLDOWN    = 40
-        TIMEOUT     = 120
-
-        if self.cooldown > 0:
-            self.cooldown -= 1
-            self.hint = "GOOD! REST..."
-            self.hint_color = (64, 255, 100)
-            return min(l_ang, r_ang)
-
-        self.phase_frame += 1
-
-        if self.phase == "READY":
-            if diff < STAND_DIFF:
-                self.phase = "STANDING"
-                self.phase_frame = 0
-                self.hint = "BALANCED — SWEEP NOW"
-                self.hint_color = (180, 160, 100)
-            else:
-                self.hint = "BALANCE FIRST"
-                self.hint_color = (180, 140, 60)
-
-        elif self.phase == "STANDING":
-            if self.phase_frame > TIMEOUT:
-                self.phase = "READY"; self.phase_frame = 0
-
-            if diff > SWEEP_DIFF:
-                self.phase = "SWEEP"
-                self.phase_frame = 0
-                self.hint = "SWEEP! RETURN NOW!"
-                self.hint_color = (64, 180, 255)
-            else:
-                self.hint = f"SHIFT WEIGHT  DIFF:{int(diff)}°"
-                self.hint_color = (180, 180, 100)
-
-        elif self.phase == "SWEEP":
-            if self.phase_frame > TIMEOUT:
-                self.phase = "READY"; self.phase_frame = 0
-                self.hint = "TOO SLOW — RETRY"
-                self.hint_color = (200, 80, 50)
-                return min(l_ang, r_ang)
-
-            if diff < RETURN_DIFF:
-                # ✅ ЗАСЧИТАН
-                increment_rep()
-                self._local_reps, self._local_xp = get_global_stats()
-                self.phase    = "READY"
-                self.cooldown = COOLDOWN
-                self.phase_frame = 0
-                self.hint = "✅ SWEEP COUNTED!"
-                self.hint_color = (64, 255, 100)
-            else:
-                self.hint = f"RETURN TO STANCE  DIFF:{int(diff)}°"
-                self.hint_color = (64, 180, 255)
-
-        return min(l_ang, r_ang)
-
-    # ═══════════════════════════════════════════════
-    # КӨТЕРМЕ — 4 фазы (глубже + подъём + выпрямление)
-    # ═══════════════════════════════════════════════
-    def analyze_koterme(self, lms):
-        _, _, knee = self.knee_angles(lms)
-        if knee is None:
-            self.hint = "SHOW LEGS TO CAMERA"
-            self.hint_color = (120, 120, 120)
-            return None
-
-        STAND_THRESH  = 155
-        DEEP_THRESH   = 95    # глубже чем Жамбас!
-        LIFT_LOW      = 95    # начало подъёма
-        LIFT_HIGH     = 145   # ещё не выпрямился
-        UP_THRESH     = 158
-        MIN_AMPLITUDE = 55    # больше чем у Жамбаса — Köterme требует реального приседа
-        COOLDOWN      = 45
-        TIMEOUT       = 150
-
-        if self.cooldown > 0:
-            self.cooldown -= 1
-            self.hint = "POWERFUL! REST..."
-            self.hint_color = (64, 255, 100)
-            return knee
-
-        self.phase_frame += 1
-
-        if self.phase == "READY":
-            if knee > STAND_THRESH:
-                self.phase = "STANDING"
-                self.start_angle = knee
-                self.peak_down   = knee
-                self.phase_frame = 0
-                self.hint = "READY — GRIP & SQUAT DEEP"
-                self.hint_color = (180, 160, 100)
-            else:
-                self.hint = "STAND STRAIGHT FIRST"
-                self.hint_color = (200, 100, 50)
-
-        elif self.phase == "STANDING":
-            if self.phase_frame > TIMEOUT:
-                self.phase = "READY"; self.phase_frame = 0
-
-            if knee < knee: self.peak_down = knee
-            if knee < self.peak_down: self.peak_down = knee
-
-            if knee < DEEP_THRESH:
-                amplitude = (self.start_angle or 165) - knee
-                if amplitude >= MIN_AMPLITUDE:
-                    self.phase = "DEEP"
-                    self.phase_frame = 0
-                    self.hint = "DEEP! NOW LIFT & THROW!"
-                    self.hint_color = (64, 180, 255)
-                else:
-                    self.hint = f"NEED DEEPER!  {int(knee)}° / need <{DEEP_THRESH}°"
-                    self.hint_color = (200, 120, 50)
-            else:
-                self.hint = f"SQUAT DEEPER  {int(knee)}°"
-                self.hint_color = (180, 180, 100)
-
-        elif self.phase == "DEEP":
-            if self.phase_frame > TIMEOUT:
-                self.phase = "READY"; self.phase_frame = 0
-                self.hint = "TIMEOUT — TRY AGAIN"
-                self.hint_color = (200, 80, 50)
-                return knee
-
-            if knee < self.peak_down:
-                self.peak_down = knee
-
-            if LIFT_LOW < knee < LIFT_HIGH:
-                self.phase = "LIFTING"
-                self.phase_frame = 0
-                self.hint = "LIFT! ALMOST THERE!"
-                self.hint_color = (255, 180, 0)
-
-        elif self.phase == "LIFTING":
-            if self.phase_frame > TIMEOUT:
-                self.phase = "READY"; self.phase_frame = 0
-                self.hint = "TIMEOUT — TRY AGAIN"
-                self.hint_color = (200, 80, 50)
-                return knee
-
-            if knee > UP_THRESH:
-                real_amplitude = knee - self.peak_down
-                if real_amplitude >= MIN_AMPLITUDE:
-                    # ✅ ЗАСЧИТАН
-                    increment_rep()
-                    self._local_reps, self._local_xp = get_global_stats()
-                    self.phase    = "READY"
-                    self.cooldown = COOLDOWN
-                    self.peak_down = 180
-                    self.phase_frame = 0
-                    self.hint = "✅ LIFT COUNTED!"
-                    self.hint_color = (64, 255, 100)
-                else:
-                    self.phase = "READY"; self.phase_frame = 0
-                    self.hint = "NOT DEEP ENOUGH!"
-                    self.hint_color = (200, 80, 50)
-            else:
-                self.hint = f"PUSH UP FULLY!  {int(knee)}°"
-                self.hint_color = (255, 180, 0)
-
-        return knee
-
-    # ═══════════════════════════════════════════════
-    # ГЛАВНЫЙ ОБРАБОТЧИК КАДРА
-    # ═══════════════════════════════════════════════
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        img = cv2.flip(img, 1)
-        h, w = img.shape[:2]
-
-        rgb     = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        results = self.pose.process(rgb)
-
-        angle_val = None
-
-        if results.pose_landmarks:
-            lms = results.pose_landmarks.landmark
-
-            # Цвет скелета: зелёный в норме, оранжевый в подседе
-            skel_color = (64, 255, 100)
-            if self.phase in ("DOWN", "DEEP", "LIFTING", "SWEEP"):
-                skel_color = (64, 180, 255)
-
-            mp_drawing.draw_landmarks(
-                img, results.pose_landmarks, mp_pose.POSE_CONNECTIONS,
-                mp_drawing.DrawingSpec(color=skel_color, thickness=2, circle_radius=3),
-                mp_drawing.DrawingSpec(color=(255, 255, 255), thickness=1, circle_radius=1)
-            )
-
-            try:
-                move = self.current_move
-                if move == "Zhambas":
-                    angle_val = self.analyze_zhambas(lms)
-                elif move == "Shalu":
-                    angle_val = self.analyze_shalu(lms)
-                elif move == "Koterme":
-                    angle_val = self.analyze_koterme(lms)
-            except Exception as e:
-                self.hint       = "POSITIONING..."
-                self.hint_color = (120, 120, 120)
-
-        else:
-            self.hint       = "STAND IN FRAME"
-            self.hint_color = (120, 120, 120)
-
-        # ── HUD ────────────────────────────────────
-        overlay = img.copy()
-        cv2.rectangle(overlay, (0, 0),        (w, 64),     (5, 8, 14), -1)
-        cv2.line(overlay,      (0, 64),        (w, 64),     (80, 60, 20), 1)
-        cv2.rectangle(overlay, (0, h - 58),   (w, h),      (5, 8, 14), -1)
-        cv2.line(overlay,      (0, h - 58),   (w, h - 58), (80, 60, 20), 1)
-        img = cv2.addWeighted(overlay, 0.85, img, 0.15, 0)
-
-        # Верхняя строка
-        cv2.putText(img, self.current_name,
-                    (16, 40), cv2.FONT_HERSHEY_DUPLEX, 0.7, (230, 220, 200), 1, cv2.LINE_AA)
-        cv2.putText(img, self.current_move.upper(),
-                    (w // 2 - 60, 40), cv2.FONT_HERSHEY_DUPLEX, 0.7, (240, 192, 64), 1, cv2.LINE_AA)
-        cv2.putText(img, f"XP: {self._local_xp}",
-                    (w - 170, 25), cv2.FONT_HERSHEY_DUPLEX, 0.55, (180, 140, 40), 1, cv2.LINE_AA)
-        cv2.putText(img, f"REPS: {self._local_reps}",
-                    (w - 170, 48), cv2.FONT_HERSHEY_DUPLEX, 0.55, (77, 200, 255), 1, cv2.LINE_AA)
-
-        # Нижняя строка: угол | подсказка | фаза
-        if angle_val is not None:
-            cv2.putText(img, f"{int(angle_val)}" + chr(176),
-                        (16, h - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (150, 130, 80), 2, cv2.LINE_AA)
-
-        # Подсказка — центр
-        hint_x = max(10, w // 2 - len(self.hint) * 7)
-        cv2.putText(img, self.hint,
-                    (hint_x, h - 18), cv2.FONT_HERSHEY_DUPLEX, 0.78, self.hint_color, 2, cv2.LINE_AA)
-
-        # Фаза — правый угол
-        phase_colors = {
-            "READY":    (100, 90, 50),
-            "STANDING": (180, 160, 80),
-            "DOWN":     (64, 180, 255),
-            "DEEP":     (64, 180, 255),
-            "LIFTING":  (255, 180, 0),
-            "SWEEP":    (64, 180, 255),
-        }
-        p_color = phase_colors.get(self.phase, (100, 90, 50))
-        cv2.putText(img, self.phase,
-                    (w - 120, h - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.58, p_color, 1, cv2.LINE_AA)
-
-        # Мини прогресс-бар амплитуды для Жамбас/Көтерме
-        if angle_val is not None and self.phase in ("STANDING", "DOWN", "DEEP", "LIFTING"):
-            bar_w  = 160
-            bar_x  = (w - bar_w) // 2
-            bar_y  = h - 52
-            filled = int(bar_w * max(0, min(1, (170 - (self.peak_down or 170)) / 70)))
-            cv2.rectangle(img, (bar_x, bar_y),              (bar_x + bar_w, bar_y + 4), (40, 40, 40), -1)
-            cv2.rectangle(img, (bar_x, bar_y),              (bar_x + filled, bar_y + 4), (64, 180, 255), -1)
-            cv2.putText(img, "DEPTH",
-                        (bar_x, bar_y - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (100, 80, 40), 1, cv2.LINE_AA)
-
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
-
-
-# ─────────────────────────────────────────────
-# 8. ГЛАВНЫЙ ИНТЕРФЕЙС
-# ─────────────────────────────────────────────
-def main():
-
-    # ── САЙДБАР ──────────────────────────────────
-    with st.sidebar:
-        st.markdown("### 🦅 WARRIOR PROFILE")
-
-        name = st.text_input("Warrior Name", value=st.session_state["name"], key="name_input")
-        st.session_state["name"] = name
-
-        move = st.selectbox(
-            "Select Drill",
-            ["Zhambas", "Shalu", "Koterme"],
-            index=["Zhambas", "Shalu", "Koterme"].index(st.session_state["move"])
-        )
-        st.session_state["move"] = move
-
-        st.markdown('<hr class="divider">', unsafe_allow_html=True)
-
-        g_reps, g_xp = get_global_stats()
-        st.session_state["reps"] = g_reps
-        st.session_state["xp"]   = g_xp
-
-        xp   = st.session_state["xp"]
-        rank = get_rank(xp)
-        st.markdown(f"""
-        <div class="sidebar-rank">
-            <div class="sidebar-rank-icon">{rank['icon']}</div>
-            <div class="sidebar-rank-name">{rank['name']}</div>
-            <div class="sidebar-rank-desc">{rank['desc']}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        prog, next_xp = get_rank_progress(xp)
-        st.markdown(f"""
-        <div style="margin-bottom:4px;">
-            <span style="font-family:'Rajdhani',sans-serif;font-size:0.7rem;color:#5a4a2a;letter-spacing:2px;">{xp} / {next_xp} XP</span>
-        </div>
-        <div class="xp-track"><div class="xp-fill" style="width:{prog}%"></div></div>
-        """, unsafe_allow_html=True)
-
-        st.markdown('<hr class="divider">', unsafe_allow_html=True)
-
-        if st.button("⟳  RESET SESSION"):
-            reset_global()
-            st.session_state["reps"] = 0
-            st.session_state["xp"]   = 0
-            st.rerun()
-
-    # ── HEADER ───────────────────────────────────
-    st.markdown("""
-    <div class="hero-wrap">
-        <div class="hero-eyebrow">Қазақ Күресі · AI Coach</div>
-        <div class="hero-title">🦅 SHEBER</div>
-        <div class="hero-subtitle">THE INTELLIGENT THROW TRAINER</div>
-        <div class="hero-line"></div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ── МЕТРИКИ ──────────────────────────────────
-    xp    = st.session_state["xp"]
-    reps  = st.session_state["reps"]
-    rank  = get_rank(xp)
-    prog, next_xp = get_rank_progress(xp)
-
-    st.markdown(f"""
-    <div class="metrics-row">
-        <div class="metric-card">
-            <div class="metric-label">Rank</div>
-            <div class="metric-value">{rank['icon']} {rank['name']}</div>
-            <div class="xp-caption">{rank['desc']}</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">Experience</div>
-            <div class="metric-value">{xp}</div>
-            <div class="xp-track"><div class="xp-fill" style="width:{prog}%"></div></div>
-            <div class="xp-caption">{xp} / {next_xp} XP TO NEXT RANK</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">Reps Completed</div>
-            <div class="metric-value blue">{reps}</div>
-            <div class="xp-caption">+10 XP PER REP</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">Current Drill</div>
-            <div class="metric-value" style="font-size:1.5rem;">{st.session_state['move'].upper()}</div>
-            <div class="xp-caption">КАЗАҚ КҮРЕСІ</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ── ВИДЕО + ГАЙД ─────────────────────────────
-    col_vid, col_guide = st.columns([2, 1])
-
-    with col_vid:
-        st.markdown("""
-        <div class="video-container">
-            <div class="video-header">
-                <div class="live-dot"></div>
-                <span class="video-title-text">LIVE · POSE TRACKING · AI ANALYSIS</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        ctx = webrtc_streamer(
-            key="sheber-v3",
-            mode=WebRtcMode.SENDRECV,
-            rtc_configuration=RTC_CONFIG,
-            video_processor_factory=SheberAI,
-            media_stream_constraints={
-                "video": {"width": 640, "height": 480, "frameRate": 25},
-                "audio": False
-            },
-            async_processing=True,
-        )
-
-        if ctx.video_processor:
-            ctx.video_processor.current_name = st.session_state["name"]
-            ctx.video_processor.current_move = st.session_state["move"]
-
-    with col_guide:
-        move    = st.session_state["move"]
-        img_map = {
-            "Zhambas": "jambass.jpg",
-            "Shalu":   "shalu.jpg",
-            "Koterme": "koterme.webp"
-        }
-        img_path = img_map.get(move, "hero.jpg")
-        if os.path.exists(img_path):
-            st.image(img_path, use_container_width=True)
-        elif os.path.exists("hero.jpg"):
-            st.image("hero.jpg", use_container_width=True)
-
-        guides = {
-            "Zhambas": {
-                "title": "ЖАМБАС", "desc": "Бедренный бросок",
-                "tip": "Держи спину ровно при подседе. Взрыв идёт от бёдер — корпус должен войти под противника. Контролируй центр тяжести.",
-                "steps": ["Захват пояса", "Подсед — угол 90°", "Подъём через бедро", "Бросок вперёд"]
-            },
-            "Shalu": {
-                "title": "ШАЛУ", "desc": "Подсечка",
-                "tip": "Используй инерцию противника. Зацеп должен быть молниеносным. Контроль баланса — ключ к технике.",
-                "steps": ["Тяни на себя", "Зайди сбоку", "Подсечка ноги", "Добей на ковёр"]
-            },
-            "Koterme": {
-                "title": "КӨТЕРМЕ", "desc": "Подъёмный бросок",
-                "tip": "Это силовой приём. Контролируй захват пояса до полного завершения броска. Поднимай от земли, не от пояса.",
-                "steps": ["Глубокий захват", "Приседание", "Взрывной подъём", "Бросок назад"]
-            }
-        }
-
-        g = guides.get(move, guides["Zhambas"])
-        st.markdown(f"""
-        <div class="guide-card">
-            <div class="guide-move-title">{g['title']} · {g['desc']}</div>
-            <div class="guide-tip">💡 {g['tip']}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("**📋 Шаги техники:**")
-        for i, step in enumerate(g["steps"], 1):
-            st.markdown(f"`{i}.` {step}")
-
-    # ── FOOTER ───────────────────────────────────
-    st.markdown('<hr class="divider">', unsafe_allow_html=True)
-    if os.path.exists("hero.jpg"):
-        st.image("hero.jpg", use_container_width=True)
-    st.markdown("""
-    <div style="text-align:center;padding:16px 0 8px;font-family:'Rajdhani',sans-serif;
-                font-size:0.75rem;letter-spacing:3px;color:#3a2a10;">
-        SHEBER AI · КАЗАҚ КҮРЕСІ · 2025
-    </div>
-    """, unsafe_allow_html=True)
-
-
-if __name__ == "__main__":
-    main()
+function updateUI(){
+  const r=getRank(S.xp);
+  document.getElementById('rankIcon').textContent=r.icon;
+  document.getElementById('rankName').textContent=r.name;
+  document.getElementById('rankDesc').textContent=r.desc;
+  document.getElementById('xpCur').textContent=S.xp+' XP';
+  document.getElementById('xpNext').textContent=r.max+' XP';
+  const pct=Math.min(100,((S.xp-r.min)/(r.max-r.min))*100);
+  document.getElementById('xpFill').style.width=pct+'%';
+  document.getElementById('repCount').textContent=S.reps;
+  document.getElementById('xpCount').textContent=S.xp;
+  // status box
+  const sb=document.getElementById('statusBox');
+  const map={gold:'s-ready',green:'s-good',blue:'s-active',orange:'s-active',red:'s-warn',gray:'s-ready'};
+  sb.className='status-box '+(map[S.hintColor]||'s-ready');
+  sb.textContent=S.hint;
+}
+
+function selectDrill(d,el){
+  S.drill=d; S.phase='READY'; S.phaseFrame=0; S.cooldown=0; S.peakDown=180; S.startAngle=null;
+  document.querySelectorAll('.drill-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  const data=DRILLS[d];
+  document.getElementById('guideTitle').textContent=data.title;
+  document.getElementById('guideSub').textContent=data.sub;
+  document.getElementById('guideTip').textContent=data.tip;
+  document.getElementById('detectBadge').textContent=data.detect;
+  document.getElementById('guideImg').src=data.img;
+  document.getElementById('stepsList').innerHTML=
+    data.steps.map((s,i)=>`<div class="step"><span class="step-n">${String(i+1).padStart(2,'0')}</span>${s}</div>`).join('');
+  S.hint='READY'; S.hintColor='gold'; updateUI();
+}
+
+function resetSession(){
+  S.reps=0; S.xp=0; S.phase='READY'; S.phaseFrame=0; S.cooldown=0; S.peakDown=180; S.startAngle=null;
+  S.hint='RESET — GO!'; S.hintColor='gold'; updateUI();
+}
+
+function setHint(text,color){S.hint=text;S.hintColor=color;}
+
+function countRep(){
+  S.reps++; S.xp+=10;
+  setHint('✅ REP COUNTED!','green');
+  updateUI();
+}
+
+// ═══════════════════════════════════════════════
+//  УГОЛ МЕЖДУ 3 ТОЧКАМИ
+// ═══════════════════════════════════════════════
+function calcAngle(a,b,c){
+  const r=Math.atan2(c.y-b.y,c.x-b.x)-Math.atan2(a.y-b.y,a.x-b.x);
+  let ang=Math.abs(r*180/Math.PI);
+  return ang>180?360-ang:ang;
+}
+
+// ═══════════════════════════════════════════════
+//  ПОЛУЧАЕМ УГЛЫ КОЛЕНЕЙ (с проверкой visibility)
+// ═══════════════════════════════════════════════
+const VIS=0.5;
+function kneeAngles(lm){
+  // Индексы MediaPipe: 23=LEFT_HIP 25=LEFT_KNEE 27=LEFT_ANKLE  24=RIGHT_HIP 26=RIGHT_KNEE 28=RIGHT_ANKLE
+  const lv=lm[23].visibility>VIS&&lm[25].visibility>VIS&&lm[27].visibility>VIS;
+  const rv=lm[24].visibility>VIS&&lm[26].visibility>VIS&&lm[28].visibility>VIS;
+  const la=lv?calcAngle(lm[23],lm[25],lm[27]):null;
+  const ra=rv?calcAngle(lm[24],lm[26],lm[28]):null;
+  if(la===null&&ra===null) return{l:null,r:null,min:null};
+  if(la===null) return{l:ra,r:ra,min:ra};
+  if(ra===null) return{l:la,r:la,min:la};
+  return{l:la,r:ra,min:Math.min(la,ra)};
+}
+
+// ═══════════════════════════════════════════════
+//  ЖАМБАС — строгие 3 фазы
+// ═══════════════════════════════════════════════
+function analyzeZhambas(lm){
+  const {min:knee}=kneeAngles(lm);
+  if(knee===null){setHint('SHOW LEGS TO CAMERA','gray');return null;}
+
+  const STAND=155,DOWN=115,UP=158,AMP=40,CD=40,TO=120;
+
+  if(S.cooldown>0){S.cooldown--;setHint('GREAT! PREPARE...','green');return knee;}
+  S.phaseFrame++;
+
+  if(S.phase==='READY'){
+    if(knee>STAND){
+      S.phase='STANDING';S.startAngle=knee;S.peakDown=knee;S.phaseFrame=0;
+      setHint('READY — SQUAT NOW','gold');
+    } else setHint('STAND STRAIGHT FIRST','red');
+  }
+  else if(S.phase==='STANDING'){
+    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;}
+    if(knee<S.peakDown) S.peakDown=knee;
+    if(knee<DOWN){
+      const amp=(S.startAngle||170)-knee;
+      if(amp>=AMP){
+        S.phase='DOWN';S.phaseFrame=0;
+        setHint('DEEP! DRIVE UP!','blue');
+      } else setHint('SQUAT DEEPER!','red');
+    } else setHint(`SQUAT — BEND KNEES  ${Math.round(knee)}°`,'gold');
+  }
+  else if(S.phase==='DOWN'){
+    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;setHint('TIMEOUT — RETRY','red');return knee;}
+    if(knee<S.peakDown) S.peakDown=knee;
+    if(knee>UP){
+      const amp=knee-S.peakDown;
+      if(amp>=AMP){countRep();S.phase='READY';S.cooldown=CD;S.peakDown=180;S.phaseFrame=0;}
+      else{S.phase='READY';S.phaseFrame=0;setHint('NOT DEEP ENOUGH!','red');}
+    } else setHint(`PUSH UP! EXPLODE!  ${Math.round(knee)}°`,'blue');
+  }
+  return knee;
+}
+
+// ═══════════════════════════════════════════════
+//  ШАЛУ — разница углов ног
+// ═══════════════════════════════════════════════
+function analyzeShalu(lm){
+  const {l,r}=kneeAngles(lm);
+  if(l===null||r===null){setHint('SHOW BOTH LEGS','gray');return null;}
+  const diff=Math.abs(l-r);
+  const STDIFF=20,SWDIFF=45,RETDIFF=22,CD=40,TO=120;
+
+  if(S.cooldown>0){S.cooldown--;setHint('GREAT! PREPARE...','green');return Math.min(l,r);}
+  S.phaseFrame++;
+
+  if(S.phase==='READY'){
+    if(diff<STDIFF){S.phase='STANDING';S.phaseFrame=0;setHint('BALANCED — SWEEP!','gold');}
+    else setHint(`BALANCE FEET  DIFF:${Math.round(diff)}°`,'red');
+  }
+  else if(S.phase==='STANDING'){
+    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;}
+    if(diff>SWDIFF){S.phase='SWEEP';S.phaseFrame=0;setHint('SWEEP! RETURN NOW!','blue');}
+    else setHint(`SHIFT WEIGHT  DIFF:${Math.round(diff)}°`,'gold');
+  }
+  else if(S.phase==='SWEEP'){
+    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;setHint('TOO SLOW — RETRY','red');return Math.min(l,r);}
+    if(diff<RETDIFF){countRep();S.phase='READY';S.cooldown=CD;S.phaseFrame=0;}
+    else setHint(`RETURN STANCE  DIFF:${Math.round(diff)}°`,'blue');
+  }
+  return Math.min(l,r);
+}
+
+// ═══════════════════════════════════════════════
+//  КӨТЕРМЕ — 4 строгие фазы
+// ═══════════════════════════════════════════════
+function analyzeKoterme(lm){
+  const {min:knee}=kneeAngles(lm);
+  if(knee===null){setHint('SHOW LEGS TO CAMERA','gray');return null;}
+  const STAND=155,DEEP=95,LIFTLO=95,LIFTHI=145,UP=158,AMP=55,CD=45,TO=150;
+
+  if(S.cooldown>0){S.cooldown--;setHint('POWERFUL! PREPARE...','green');return knee;}
+  S.phaseFrame++;
+
+  if(S.phase==='READY'){
+    if(knee>STAND){
+      S.phase='STANDING';S.startAngle=knee;S.peakDown=knee;S.phaseFrame=0;
+      setHint('GRIP & SQUAT DEEP','gold');
+    } else setHint('STAND STRAIGHT FIRST','red');
+  }
+  else if(S.phase==='STANDING'){
+    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;}
+    if(knee<S.peakDown) S.peakDown=knee;
+    if(knee<DEEP){
+      const amp=(S.startAngle||165)-knee;
+      if(amp>=AMP){S.phase='DEEP';S.phaseFrame=0;setHint('DEEP! LIFT & THROW!','blue');}
+      else setHint(`NEED DEEPER! ${Math.round(knee)}°`,'red');
+    } else setHint(`SQUAT DEEP <${DEEP}°  NOW:${Math.round(knee)}°`,'gold');
+  }
+  else if(S.phase==='DEEP'){
+    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;setHint('TIMEOUT — RETRY','red');return knee;}
+    if(knee<S.peakDown) S.peakDown=knee;
+    if(knee>LIFTLO&&knee<LIFTHI){S.phase='LIFTING';S.phaseFrame=0;setHint('LIFT! ALMOST THERE!','orange');}
+    else setHint(`HOLD DEEP  ${Math.round(knee)}°`,'blue');
+  }
+  else if(S.phase==='LIFTING'){
+    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;setHint('TIMEOUT — RETRY','red');return knee;}
+    if(knee>UP){
+      const amp=knee-S.peakDown;
+      if(amp>=AMP){countRep();S.phase='READY';S.cooldown=CD;S.peakDown=180;S.phaseFrame=0;}
+      else{S.phase='READY';S.phaseFrame=0;setHint('NOT DEEP ENOUGH!','red');}
+    } else setHint(`PUSH UP FULLY!  ${Math.round(knee)}°`,'orange');
+  }
+  return knee;
+}
+
+// ═══════════════════════════════════════════════
+//  ОТРИСОВКА CANVAS
+// ═══════════════════════════════════════════════
+const CONNECTIONS=[
+  [11,12],[11,13],[13,15],[12,14],[14,16],
+  [11,23],[12,24],[23,24],
+  [23,25],[24,26],[25,27],[26,28],[27,29],[28,30],[29,31],[30,32]
+];
+
+function drawSkeleton(ctx,lm,W,H){
+  const phaseColors={READY:'#f0c040',STANDING:'#f0c040',DOWN:'#4dc8ff',DEEP:'#4dc8ff',LIFTING:'#ff9a00',SWEEP:'#4dc8ff'};
+  const col=phaseColors[S.phase]||'#4dff8a';
+  ctx.strokeStyle=col; ctx.lineWidth=2.5;
+  for(const[a,b] of CONNECTIONS){
+    if(!lm[a]||!lm[b]) continue;
+    if(lm[a].visibility<0.4||lm[b].visibility<0.4) continue;
+    ctx.beginPath();
+    ctx.moveTo(lm[a].x*W,lm[a].y*H);
+    ctx.lineTo(lm[b].x*W,lm[b].y*H);
+    ctx.stroke();
+  }
+  for(const p of lm){
+    if(p.visibility<0.4) continue;
+    ctx.beginPath(); ctx.arc(p.x*W,p.y*H,4,0,Math.PI*2);
+    ctx.fillStyle='#f0c040'; ctx.fill();
+  }
+}
+
+function hintCssToRgb(c){
+  return{gold:[240,192,64],green:[64,255,138],blue:[77,200,255],red:[255,64,64],orange:[255,154,0],gray:[150,140,120]}[c]||[240,192,64];
+}
+
+function drawHUD(ctx,W,H,knee){
+  const name=document.getElementById('nameInp').value||'Batyr';
+  // bars
+  ctx.fillStyle='rgba(5,8,14,.84)'; ctx.fillRect(0,0,W,56);
+  ctx.strokeStyle='rgba(140,100,20,.5)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(0,56); ctx.lineTo(W,56); ctx.stroke();
+  ctx.fillStyle='rgba(5,8,14,.84)'; ctx.fillRect(0,H-52,W,52);
+  ctx.beginPath(); ctx.moveTo(0,H-52); ctx.lineTo(W,H-52); ctx.stroke();
+
+  // top texts
+  ctx.fillStyle='#e8dcc8'; ctx.font='700 15px Rajdhani,sans-serif';
+  ctx.fillText(name,14,36);
+  ctx.fillStyle='#f0c040'; ctx.font='700 16px Rajdhani,sans-serif';
+  const dw=ctx.measureText(S.drill).width;
+  ctx.fillText(S.drill.toUpperCase(),W/2-dw/2,36);
+  ctx.fillStyle='#b8860b'; ctx.font='600 11px Rajdhani,sans-serif';
+  ctx.fillText('XP: '+S.xp,W-120,22);
+  ctx.fillStyle='#4dc8ff';
+  ctx.fillText('REPS: '+S.reps,W-120,40);
+
+  // phase label top-left small
+  const phCol={READY:'rgba(180,160,80,.7)',STANDING:'rgba(180,160,80,.9)',DOWN:'rgba(77,200,255,.9)',DEEP:'rgba(77,200,255,.9)',LIFTING:'rgba(255,154,0,.9)',SWEEP:'rgba(77,200,255,.9)'};
+  ctx.fillStyle=phCol[S.phase]||'rgba(180,160,80,.7)';
+  ctx.font='600 11px Space Mono,monospace';
+  ctx.fillText(S.phase,14,52);
+
+  // angle bottom-left
+  if(knee!==null){
+    ctx.fillStyle='rgba(150,130,80,.9)'; ctx.font='600 14px Space Mono,monospace';
+    ctx.fillText(Math.round(knee)+'°',14,H-16);
+  }
+
+  // hint bottom-center
+  const rgb=hintCssToRgb(S.hintColor);
+  ctx.fillStyle=`rgba(${rgb[0]},${rgb[1]},${rgb[2]},1)`;
+  ctx.font='700 16px Rajdhani,sans-serif';
+  const hw=ctx.measureText(S.hint).width;
+  ctx.fillText(S.hint,W/2-hw/2,H-16);
+}
+
+// depth bar overlay
+function updateDepthBar(knee){
+  const wrap=document.getElementById('depthBarWrap');
+  const fill=document.getElementById('depthFill');
+  if(S.phase==='STANDING'||S.phase==='DOWN'||S.phase==='DEEP'||S.phase==='LIFTING'){
+    wrap.style.display='flex';
+    const depth=Math.max(0,Math.min(1,(170-(S.peakDown||170))/80));
+    fill.style.width=(depth*100)+'%';
+    fill.style.background=depth>0.6?'#4dff8a':depth>0.3?'#4dc8ff':'#ff9a00';
+  } else wrap.style.display='none';
+}
+
+// ═══════════════════════════════════════════════
+//  MEDIAPIPE + CAMERA
+// ═══════════════════════════════════════════════
+const videoEl=document.getElementById('videoEl');
+const canvasEl=document.getElementById('canvasEl');
+const ctx2d=canvasEl.getContext('2d');
+
+function onResults(results){
+  const W=canvasEl.width,H=canvasEl.height;
+  // mirror draw
+  ctx2d.save(); ctx2d.scale(-1,1); ctx2d.drawImage(results.image,-W,0,W,H); ctx2d.restore();
+
+  let knee=null;
+  if(results.poseLandmarks&&results.poseLandmarks.length>0){
+    // mirror landmarks horizontally (x = 1-x)
+    const lm=results.poseLandmarks.map(p=>({x:1-p.x,y:p.y,z:p.z,visibility:p.visibility}));
+    drawSkeleton(ctx2d,lm,W,H);
+    if(S.drill==='Zhambas')  knee=analyzeZhambas(lm);
+    else if(S.drill==='Shalu')   knee=analyzeShalu(lm);
+    else if(S.drill==='Koterme') knee=analyzeKoterme(lm);
+  } else {
+    setHint('STAND IN FRAME','gray');
+  }
+  drawHUD(ctx2d,W,H,knee);
+  updateDepthBar(knee);
+  updateUI();
+}
+
+async function startCamera(){
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({
+      video:{width:{ideal:640},height:{ideal:480},facingMode:'user'},audio:false
+    });
+    videoEl.srcObject=stream;
+    await new Promise(r=>videoEl.onloadedmetadata=r);
+    videoEl.play();
+    canvasEl.width=videoEl.videoWidth||640;
+    canvasEl.height=videoEl.videoHeight||480;
+    document.getElementById('placeholder').style.display='none';
+    S.running=true;
+
+    const pose=new Pose({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${f}`});
+    pose.setOptions({modelComplexity:0,smoothLandmarks:true,enableSegmentation:false,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
+    pose.onResults(onResults);
+
+    async function loop(){
+      if(!S.running) return;
+      await pose.send({image:videoEl});
+      requestAnimationFrame(loop);
+    }
+    loop();
+  }catch(e){
+    console.error(e);
+    document.getElementById('errMsg').style.display='block';
+  }
+}
+
+// init
+updateUI();
+</script>
+</body>
+</html>
