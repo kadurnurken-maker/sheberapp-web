@@ -316,6 +316,7 @@ function updateUI(){
 
 function selectDrill(d,el){
   S.drill=d; S.phase='READY'; S.phaseFrame=0; S.cooldown=0; S.peakDown=180; S.startAngle=null;
+  resetEma(); // сбрасываем сглаживание при смене броска
   document.querySelectorAll('.drill-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
   const data=DRILLS[d];
@@ -331,6 +332,7 @@ function selectDrill(d,el){
 
 function resetSession(){
   S.reps=0; S.xp=0; S.phase='READY'; S.phaseFrame=0; S.cooldown=0; S.peakDown=180; S.startAngle=null;
+  resetEma();
   S.hint='RESET — GO!'; S.hintColor='gold'; updateUI();
 }
 
@@ -351,20 +353,32 @@ function calcAngle(a,b,c){
   return ang>180?360-ang:ang;
 }
 
+// EMA-сглаживание: убирает шум MediaPipe (±10-15°)
+// Без него прыгающие углы дают ложные засчёты
+const _ema={knee:null,diff:null};
+function emaFilter(key,raw,alpha){
+  if(_ema[key]===null){_ema[key]=raw;return raw;}
+  _ema[key]=alpha*raw+(1-alpha)*_ema[key];
+  return _ema[key];
+}
+function resetEma(){_ema.knee=null;_ema.diff=null;}
+
 // ═══════════════════════════════════════════════
 //  ПОЛУЧАЕМ УГЛЫ КОЛЕНЕЙ (с проверкой visibility)
 // ═══════════════════════════════════════════════
-const VIS=0.5;
+const VIS=0.55; // строже: 0.55 вместо 0.5
 function kneeAngles(lm){
-  // Индексы MediaPipe: 23=LEFT_HIP 25=LEFT_KNEE 27=LEFT_ANKLE  24=RIGHT_HIP 26=RIGHT_KNEE 28=RIGHT_ANKLE
   const lv=lm[23].visibility>VIS&&lm[25].visibility>VIS&&lm[27].visibility>VIS;
   const rv=lm[24].visibility>VIS&&lm[26].visibility>VIS&&lm[28].visibility>VIS;
   const la=lv?calcAngle(lm[23],lm[25],lm[27]):null;
   const ra=rv?calcAngle(lm[24],lm[26],lm[28]):null;
-  if(la===null&&ra===null) return{l:null,r:null,min:null};
-  if(la===null) return{l:ra,r:ra,min:ra};
-  if(ra===null) return{l:la,r:la,min:la};
-  return{l:la,r:ra,min:Math.min(la,ra)};
+  if(la===null&&ra===null){resetEma();return{l:null,r:null,min:null};}
+  const rawMin=la===null?ra:ra===null?la:Math.min(la,ra);
+  const rawDiff=la!==null&&ra!==null?Math.abs(la-ra):0;
+  // alpha=0.4: убирает одиночные прыжки, но не замедляет реальное движение
+  const smoothMin=emaFilter('knee',rawMin,0.4);
+  const smoothDiff=emaFilter('diff',rawDiff,0.4);
+  return{l:la??ra,r:ra??la,min:smoothMin,diff:smoothDiff};
 }
 
 // ═══════════════════════════════════════════════
@@ -381,28 +395,42 @@ function analyzeZhambas(lm){
 
   if(S.phase==='READY'){
     if(knee>STAND){
-      S.phase='STANDING';S.startAngle=knee;S.peakDown=knee;S.phaseFrame=0;
+      S.phase='STANDING';
+      // startAngle обновляется непрерывно пока стоишь прямо
+      S.startAngle=knee; S.peakDown=knee; S.phaseFrame=0;
       setHint('READY — SQUAT NOW','gold');
-    } else setHint('STAND STRAIGHT FIRST','red');
+    } else {
+      // сбрасываем EMA если не в стойке — чтобы не было ложного startAngle
+      S.startAngle=null;
+      setHint('STAND STRAIGHT FIRST','red');
+    }
   }
   else if(S.phase==='STANDING'){
-    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;}
+    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;S.startAngle=null;}
+    // обновляем startAngle пока угол большой (человек стоит прямо)
+    if(knee>STAND) S.startAngle=knee;
     if(knee<S.peakDown) S.peakDown=knee;
     if(knee<DOWN){
-      const amp=(S.startAngle||170)-knee;
+      // амплитуда = разница между последним "прямым" положением и текущим
+      const top=S.startAngle||170;
+      const amp=top-S.peakDown; // peakDown уже самое низкое значение
       if(amp>=AMP){
         S.phase='DOWN';S.phaseFrame=0;
         setHint('DEEP! DRIVE UP!','blue');
-      } else setHint('SQUAT DEEPER!','red');
-    } else setHint(`SQUAT — BEND KNEES  ${Math.round(knee)}°`,'gold');
+      } else setHint(`SQUAT DEEPER! AMP:${Math.round(amp)}°`,'red');
+    } else setHint(`SQUAT — ${Math.round(knee)}°  NEED <${DOWN}°`,'gold');
   }
   else if(S.phase==='DOWN'){
-    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;setHint('TIMEOUT — RETRY','red');return knee;}
+    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;S.startAngle=null;setHint('TIMEOUT — RETRY','red');return knee;}
     if(knee<S.peakDown) S.peakDown=knee;
     if(knee>UP){
       const amp=knee-S.peakDown;
-      if(amp>=AMP){countRep();S.phase='READY';S.cooldown=CD;S.peakDown=180;S.phaseFrame=0;}
-      else{S.phase='READY';S.phaseFrame=0;setHint('NOT DEEP ENOUGH!','red');}
+      if(amp>=AMP){
+        countRep();S.phase='READY';S.cooldown=CD;S.peakDown=180;S.phaseFrame=0;S.startAngle=null;
+      } else {
+        S.phase='READY';S.phaseFrame=0;S.startAngle=null;
+        setHint(`NOT DEEP ENOUGH! AMP:${Math.round(amp)}°`,'red');
+      }
     } else setHint(`PUSH UP! EXPLODE!  ${Math.round(knee)}°`,'blue');
   }
   return knee;
@@ -414,27 +442,58 @@ function analyzeZhambas(lm){
 function analyzeShalu(lm){
   const {l,r}=kneeAngles(lm);
   if(l===null||r===null){setHint('SHOW BOTH LEGS','gray');return null;}
-  const diff=Math.abs(l-r);
-  const STDIFF=20,SWDIFF=45,RETDIFF=22,CD=40,TO=120;
 
-  if(S.cooldown>0){S.cooldown--;setHint('GREAT! PREPARE...','green');return Math.min(l,r);}
+  // Отдельный EMA для разницы углов ног — нужен свой фильтр
+  const rawDiff=Math.abs(l-r);
+  const diff=emaFilter('diff',rawDiff,0.4);
+
+  // Пороги Шалу:
+  // STDIFF=18 — стоишь ровно (обе ноги одинаково)
+  // SWDIFF=52 — реальный перенос веса на одну ногу (подсечка)
+  // RETDIFF=20 — вернулся в стойку — засчитываем
+  // Нужно чтобы оба колена были относительно прямыми в стойке
+  const STDIFF=18,SWDIFF=52,RETDIFF=20,CD=45,TO=130;
+  const minKnee=Math.min(l,r);
+
+  if(S.cooldown>0){S.cooldown--;setHint('GREAT! PREPARE...','green');return minKnee;}
   S.phaseFrame++;
 
   if(S.phase==='READY'){
-    if(diff<STDIFF){S.phase='STANDING';S.phaseFrame=0;setHint('BALANCED — SWEEP!','gold');}
-    else setHint(`BALANCE FEET  DIFF:${Math.round(diff)}°`,'red');
+    // Стойка: ноги ровные И разница маленькая
+    if(diff<STDIFF && minKnee>140){
+      S.phase='STANDING';S.phaseFrame=0;
+      setHint('BALANCED — DO SWEEP!','gold');
+    } else if(minKnee<=140){
+      setHint('STAND STRAIGHT FIRST','red');
+    } else {
+      setHint(`BALANCE FEET  DIFF:${Math.round(diff)}°`,'red');
+    }
   }
   else if(S.phase==='STANDING'){
     if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;}
-    if(diff>SWDIFF){S.phase='SWEEP';S.phaseFrame=0;setHint('SWEEP! RETURN NOW!','blue');}
-    else setHint(`SHIFT WEIGHT  DIFF:${Math.round(diff)}°`,'gold');
+    // Обновляем стойку пока стоим ровно
+    if(diff<STDIFF && minKnee>140) S.phaseFrame=0; // не даём таймауту сработать в стойке
+    if(diff>SWDIFF){
+      S.phase='SWEEP';S.phaseFrame=0;
+      setHint('SWEEP! RETURN NOW!','blue');
+    } else {
+      setHint(`SHIFT WEIGHT  DIFF:${Math.round(diff)}°`,'gold');
+    }
   }
   else if(S.phase==='SWEEP'){
-    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;setHint('TOO SLOW — RETRY','red');return Math.min(l,r);}
-    if(diff<RETDIFF){countRep();S.phase='READY';S.cooldown=CD;S.phaseFrame=0;}
-    else setHint(`RETURN STANCE  DIFF:${Math.round(diff)}°`,'blue');
+    if(S.phaseFrame>TO){
+      S.phase='READY';S.phaseFrame=0;
+      setHint('TOO SLOW — RETRY','red');
+      return minKnee;
+    }
+    if(diff<RETDIFF && minKnee>140){
+      // Засчитываем только если вернулся в нормальную стойку
+      countRep();S.phase='READY';S.cooldown=CD;S.phaseFrame=0;
+    } else {
+      setHint(`RETURN STANCE  DIFF:${Math.round(diff)}°`,'blue');
+    }
   }
-  return Math.min(l,r);
+  return minKnee;
 }
 
 // ═══════════════════════════════════════════════
@@ -455,19 +514,24 @@ function analyzeKoterme(lm){
     } else setHint('STAND STRAIGHT FIRST','red');
   }
   else if(S.phase==='STANDING'){
-    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;}
+    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;S.startAngle=null;}
+    // startAngle обновляется пока стоишь прямо — как у Жамбас
+    if(knee>STAND) S.startAngle=knee;
     if(knee<S.peakDown) S.peakDown=knee;
     if(knee<DEEP){
-      const amp=(S.startAngle||165)-knee;
+      const top=S.startAngle||165;
+      const amp=top-S.peakDown;
       if(amp>=AMP){S.phase='DEEP';S.phaseFrame=0;setHint('DEEP! LIFT & THROW!','blue');}
-      else setHint(`NEED DEEPER! ${Math.round(knee)}°`,'red');
+      else setHint(`NEED DEEPER! AMP:${Math.round(amp)}° NEED ${AMP}°`,'red');
     } else setHint(`SQUAT DEEP <${DEEP}°  NOW:${Math.round(knee)}°`,'gold');
   }
   else if(S.phase==='DEEP'){
-    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;setHint('TIMEOUT — RETRY','red');return knee;}
+    if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;S.startAngle=null;setHint('TIMEOUT — RETRY','red');return knee;}
     if(knee<S.peakDown) S.peakDown=knee;
-    if(knee>LIFTLO&&knee<LIFTHI){S.phase='LIFTING';S.phaseFrame=0;setHint('LIFT! ALMOST THERE!','orange');}
-    else setHint(`HOLD DEEP  ${Math.round(knee)}°`,'blue');
+    // LIFTLO=105 (не 95!) — чтобы не прыгать сразу в LIFTING из приседа
+    // Нужно реально начать подниматься на 10° прежде чем войти в фазу LIFTING
+    if(knee>105&&knee<LIFTHI){S.phase='LIFTING';S.phaseFrame=0;setHint('LIFT! ALMOST THERE!','orange');}
+    else setHint(`HOLD & PUSH UP  ${Math.round(knee)}°`,'blue');
   }
   else if(S.phase==='LIFTING'){
     if(S.phaseFrame>TO){S.phase='READY';S.phaseFrame=0;setHint('TIMEOUT — RETRY','red');return knee;}
